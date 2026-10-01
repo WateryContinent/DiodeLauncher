@@ -87,6 +87,9 @@ public final class MinecraftRuntimeManager {
 
       try {
          this.installRuntime(component, platform, runtimeHome);
+         // Re-resolve after installation. macOS runtimes place java inside a
+         // jre.bundle, so the executable path is not the same as Linux.
+         javaExecutable = this.getJavaExecutable(runtimeHome);
       } catch (IOException | RuntimeException e) {
          if (javaExecutable.isFile()) {
             LOGGER.warn("Runtime update failed, but a local Java runtime is available at " + javaExecutable, e);
@@ -308,6 +311,31 @@ public final class MinecraftRuntimeManager {
          }
          return new File(runtimeHome, "bin/java.exe");
       }
+
+      if (OperatingSystem.getCurrentPlatform() == OperatingSystem.OSX) {
+         // Mojang's macOS managed runtimes are application-style bundles.
+         // The Java executable is *not* runtimeHome/bin/java.
+         File bundledJava = new File(runtimeHome, "jre.bundle/Contents/Home/bin/java");
+         if (bundledJava.isFile()) {
+            return bundledJava;
+         }
+
+         // Be tolerant of alternate/existing runtime layouts as well.
+         File contentsJava = new File(runtimeHome, "Contents/Home/bin/java");
+         if (contentsJava.isFile()) {
+            return contentsJava;
+         }
+
+         File flatJava = new File(runtimeHome, "bin/java");
+         if (flatJava.isFile()) {
+            return flatJava;
+         }
+
+         // Return Mojang's expected path even before the runtime has been
+         // downloaded so the same File object becomes valid after install.
+         return bundledJava;
+      }
+
       return new File(runtimeHome, "bin/java");
    }
 

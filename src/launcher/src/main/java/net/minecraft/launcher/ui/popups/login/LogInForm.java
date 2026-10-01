@@ -1,84 +1,91 @@
 package net.minecraft.launcher.ui.popups.login;
 
-import java.awt.Color;
-import java.awt.Dimension;
+import com.mojang.authlib.GameProfile;
+import com.mojang.authlib.UserAuthentication;
+import java.awt.Component;
 import java.awt.Font;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import javax.swing.BorderFactory;
-import javax.swing.BoxLayout;
+import javax.swing.Box;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
-import javax.swing.SwingUtilities;
+import net.minecraft.launcher.profile.ProfileManager;
 
 /**
- * Minimal offline login form used by the restored launcher.
- * The original Mojang username/password service no longer exists, so the first
- * screen only asks for a local player name.
+ * The original 1.6.44 login form, reduced to the one thing that still makes
+ * sense for the restored launcher: a local player name.
  */
 public class LogInForm extends JPanel implements ActionListener {
-   private static final Color LABEL_COLOR = new Color(238, 238, 238);
-   private static final Color FIELD_BACKGROUND = new Color(247, 247, 247);
-   private static final Color FIELD_FOREGROUND = new Color(32, 32, 32);
-   private static final Color FIELD_BORDER = new Color(78, 78, 78);
-
    private final LogInPopup popup;
-   private final JTextField usernameField = new JTextField("Player", 22);
+   private final JTextField usernameField;
 
    public LogInForm(LogInPopup popup) {
       this.popup = popup;
+      this.usernameField = new JTextField(this.getSuggestedUsername());
       this.usernameField.addActionListener(this);
       this.createInterface();
-
-      SwingUtilities.invokeLater(new Runnable() {
-         @Override
-         public void run() {
-            LogInForm.this.usernameField.requestFocusInWindow();
-            LogInForm.this.usernameField.selectAll();
-         }
-      });
    }
 
    protected void createInterface() {
-      this.setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
+      // Deliberately keep the original 1.6.44 GridBag/Swing styling.  The only
+      // UI changes are the label text and removal of obsolete account fields.
       this.setOpaque(false);
+      this.setLayout(new GridBagLayout());
+      GridBagConstraints constraints = new GridBagConstraints();
+      constraints.fill = GridBagConstraints.HORIZONTAL;
+      constraints.gridx = 0;
+      constraints.gridy = GridBagConstraints.RELATIVE;
+      constraints.weightx = 1.0;
 
-      JLabel nameLabel = new JLabel("Name");
-      nameLabel.setForeground(LABEL_COLOR);
-      nameLabel.setFont(nameLabel.getFont().deriveFont(Font.BOLD, 13.0F));
-      nameLabel.setAlignmentX(LEFT_ALIGNMENT);
+      this.add(Box.createGlue());
 
-      this.usernameField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
-      this.usernameField.setPreferredSize(new Dimension(300, 36));
-      this.usernameField.setMinimumSize(new Dimension(220, 36));
-      this.usernameField.setFont(this.usernameField.getFont().deriveFont(Font.PLAIN, 14.0F));
-      this.usernameField.setForeground(FIELD_FOREGROUND);
-      this.usernameField.setBackground(FIELD_BACKGROUND);
-      this.usernameField.setCaretColor(FIELD_FOREGROUND);
-      this.usernameField.setSelectionColor(new Color(89, 135, 206));
-      this.usernameField.setSelectedTextColor(Color.WHITE);
-      this.usernameField.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(FIELD_BORDER, 1),
-            BorderFactory.createEmptyBorder(7, 9, 7, 9)
-      ));
-      this.usernameField.setAlignmentX(LEFT_ALIGNMENT);
+      JLabel usernameLabel = new JLabel("Name:");
+      Font labelFont = usernameLabel.getFont().deriveFont(Font.BOLD);
+      usernameLabel.setFont(labelFont);
+      this.add((Component)usernameLabel, constraints);
+      this.add((Component)this.usernameField, constraints);
+      this.add(Box.createVerticalStrut(10), constraints);
+   }
 
-      this.add(nameLabel);
-      this.add(javax.swing.Box.createVerticalStrut(5));
-      this.add(this.usernameField);
+   private String getSuggestedUsername() {
+      try {
+         ProfileManager profileManager = this.popup.getMinecraftLauncher().getProfileManager();
+         String selectedUser = profileManager.getSelectedUser();
+         if (selectedUser != null) {
+            UserAuthentication authentication = profileManager.getAuthDatabase().getByUUID(selectedUser);
+            if (authentication != null) {
+               GameProfile selectedProfile = authentication.getSelectedProfile();
+               if (selectedProfile != null) {
+                  String name = selectedProfile.getName();
+                  if (name != null && !name.trim().isEmpty()) {
+                     return name;
+                  }
+               }
+            }
+         }
+      } catch (RuntimeException ignored) {
+         // A damaged/old profile file should never prevent the login screen
+         // from being shown.  Fall through to the historical default below.
+      }
+
+      return "Player";
    }
 
    @Override
    public void actionPerformed(ActionEvent e) {
-      this.popup.playOffline();
+      if (e.getSource() == this.usernameField) {
+         this.popup.playOffline();
+      }
    }
 
    public String getEnteredUsername() {
       return this.usernameField.getText();
    }
 
-   /** Kept for source/binary compatibility with old launcher code. */
+   /** Kept for compatibility with old launcher code that still calls it. */
    public void tryLogIn() {
       this.popup.playOffline();
    }
