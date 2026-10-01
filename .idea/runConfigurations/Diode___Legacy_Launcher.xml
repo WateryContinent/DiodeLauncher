@@ -1,0 +1,13 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Diode - Legacy Launcher" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="net.minecraft.bootstrap.Bootstrap" />
+    <module name="bootstrap" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/runtime" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+      <option name="BuildArtifacts" enabled="true">
+        <artifact name="launcher-runtime" />
+      </option>
+    </method>
+  </configuration>
+</component>

@@ -1,0 +1,5 @@
+Manifest-Version: 1.0
+Main-Class: net.minecraft.launcher.Main
+Implementation-Title: Minecraft Launcher
+Implementation-Version: - Diode 1.0
+

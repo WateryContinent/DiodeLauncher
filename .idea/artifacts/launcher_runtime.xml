@@ -1,0 +1,9 @@
+<component name="ArtifactManager">
+  <artifact type="jar" build-on-make="true" name="launcher-runtime">
+    <output-path>$PROJECT_DIR$/runtime/minecraft</output-path>
+    <root id="archive" name="launcher.jar">
+      <element id="module-output" name="launcher" />
+      <element id="extracted-dir" path="$PROJECT_DIR$/src/launcher/lib/original-launcher-dependencies.jar" path-in-jar="/" />
+    </root>
+  </artifact>
+</component>

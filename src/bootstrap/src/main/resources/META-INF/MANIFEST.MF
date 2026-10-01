@@ -1,0 +1,5 @@
+Manifest-Version: 1.0
+Main-Class: net.minecraft.bootstrap.Bootstrap
+Implementation-Title: Minecraft Bootstrap (Modernized)
+Implementation-Version: 5-jdk21
+

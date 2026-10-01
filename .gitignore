@@ -1,0 +1,18 @@
+# IntelliJ generated state (keep shared project files/run configs/artifacts)
+.idea/workspace.xml
+.idea/shelf/
+.idea/httpRequests/
+
+# Java/IntelliJ outputs
+out/
+*.class
+
+# Runtime working data
+runtime/
+
+# Built release jars
+dist/
+
+# OS noise
+.DS_Store
+Thumbs.db

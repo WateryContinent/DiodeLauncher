@@ -1,0 +1,9 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="bootstrap-release">
+    <output-path>$PROJECT_DIR$/dist</output-path>
+    <root id="archive" name="bootstrap.jar">
+      <element id="module-output" name="bootstrap" />
+      <element id="extracted-dir" path="$PROJECT_DIR$/src/bootstrap/lib/original-bootstrap-dependencies.jar" path-in-jar="/" />
+    </root>
+  </artifact>
+</component>
