@@ -43,11 +43,8 @@ jobs:
             exit 1
           fi
 
-      - name: Build installer
+      - name: Build installer and portable zip
         run: java installer/src/BuildInstaller.java
-
-      - name: Build portable zip
-        run: java installer/src/BuildInstaller.java --type app-image --use-existing-jar
 
       - name: Include launcher.jar for the auto-updater
         if: matrix.name == 'windows-x64'

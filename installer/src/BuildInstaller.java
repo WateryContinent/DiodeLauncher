@@ -2,10 +2,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -26,11 +28,14 @@ import java.util.zip.ZipOutputStream;
  * <p>Run the "Build Installer" configuration in IntelliJ, or from the project
  * folder with a JDK 21:</p>
  *
- * <pre>java installer/src/BuildInstaller.java [--type TYPE] [--use-existing-jar] [--wix-dir FOLDER]</pre>
+ * <pre>java installer/src/BuildInstaller.java [--type TYPE[,TYPE...]] [--use-existing-jar] [--wix-dir FOLDER]</pre>
+ *
+ * <p>By default it builds everything a release needs from the current OS:
+ * the installer and a portable zip. {@code --type} picks specific ones:</p>
  *
  * <ul>
- *   <li>Windows: {@code exe} (default) or {@code msi}, both need WiX Toolset 3.14.</li>
- *   <li>macOS: {@code dmg} (default) or {@code pkg}.</li>
+ *   <li>Windows: {@code exe} or {@code msi}, both need WiX Toolset 3.14.</li>
+ *   <li>macOS: {@code dmg} or {@code pkg}.</li>
  *   <li>Linux: {@code deb} or {@code rpm}.</li>
  *   <li>Any OS: {@code app-image}, a portable folder zipped up.</li>
  * </ul>
@@ -76,13 +81,13 @@ public final class BuildInstaller {
    }
 
    public static void main(String[] args) throws Exception {
-      String type = null;
+      List<String> types = null;
       boolean useExistingJar = false;
       String wixDir = null;
       for (int i = 0; i < args.length; i++) {
          switch (args[i]) {
             case "--type":
-               type = args[++i];
+               types = Arrays.asList(args[++i].split(","));
                break;
             case "--use-existing-jar":
                useExistingJar = true;
@@ -91,24 +96,26 @@ public final class BuildInstaller {
                wixDir = args[++i];
                break;
             default:
-               fail("Unknown option " + args[i] + "\nUsage: java installer/src/BuildInstaller.java [--type TYPE] [--use-existing-jar] [--wix-dir FOLDER]");
+               fail("Unknown option " + args[i] + "\nUsage: java installer/src/BuildInstaller.java [--type TYPE[,TYPE...]] [--use-existing-jar] [--wix-dir FOLDER]");
          }
       }
 
       try {
-         new BuildInstaller(findProjectRoot()).run(type, useExistingJar, wixDir);
+         new BuildInstaller(findProjectRoot()).run(types, useExistingJar, wixDir);
       } catch (BuildException e) {
          fail(e.getMessage());
       }
    }
 
-   private void run(String requestedType, boolean useExistingJar, String wixDir) throws Exception {
-      String type = requestedType != null ? requestedType : this.defaultType();
+   private void run(List<String> requestedTypes, boolean useExistingJar, String wixDir) throws Exception {
+      List<String> types = requestedTypes != null ? requestedTypes : this.defaultTypes();
       List<String> supported = this.supportedTypes();
-      if (!supported.contains(type)) {
-         throw new BuildException("Can't build '" + type + "' on " + this.os + ". Choose one of " + supported
-            + (type.equals("dmg") || type.equals("pkg") ? ". macOS installers have to be built on a Mac (the GitHub release workflow does this)." : "")
-            + (type.equals("exe") || type.equals("msi") ? ". Windows installers have to be built on Windows (the GitHub release workflow does this)." : ""));
+      for (String type : types) {
+         if (!supported.contains(type)) {
+            throw new BuildException("Can't build '" + type + "' on " + this.os + ". Choose from " + supported
+               + (type.equals("dmg") || type.equals("pkg") ? ". macOS installers have to be built on a Mac (the GitHub release workflow does this)." : "")
+               + (type.equals("exe") || type.equals("msi") ? ". Windows installers have to be built on Windows (the GitHub release workflow does this)." : ""));
+         }
       }
 
       for (String tool : new String[]{"javac", "jar", "jlink", "jpackage"}) {
@@ -122,8 +129,16 @@ public final class BuildInstaller {
       }
 
       String version = this.readVersion();
-      System.out.println("Packaging " + APP_NAME + " " + version + " (" + type + ", " + this.os + " " + this.arch + ")");
+      System.out.println("Packaging " + APP_NAME + " " + version + " as " + String.join(" + ", types) + " (" + this.os + " " + this.arch + ")");
       System.out.println("  JDK: " + this.javaHome);
+      // Two builds at once would delete each other's files, so take a lock
+      // (held until this JVM exits) before touching build/installer.
+      Files.createDirectories(this.build.getParent());
+      FileChannel lockChannel = FileChannel.open(this.build.resolveSibling("installer.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+      if (lockChannel.tryLock() == null) {
+         throw new BuildException("Another installer build is already running. Wait for it to finish, then try again.");
+      }
+
       deleteRecursively(this.build);
       Files.createDirectories(this.build);
       Files.createDirectories(this.dist);
@@ -150,7 +165,19 @@ public final class BuildInstaller {
       Files.copy(this.launcherJar, input.resolve("launcher.jar"));
       Path icon = this.writeIcon();
 
-      Path jpackageOut = this.build.resolve("out");
+      List<Path> results = new ArrayList<>();
+      for (String type : types) {
+         results.add(this.packageAs(type, version, runtime, input, icon, wixDir));
+      }
+
+      System.out.println("Done: " + this.launcherJar);
+      for (Path result : results) {
+         System.out.println("      " + result);
+      }
+   }
+
+   private Path packageAs(String type, String version, Path runtime, Path input, Path icon, String wixDir) throws Exception {
+      Path jpackageOut = this.build.resolve("out-" + type);
       List<String> command = new ArrayList<>(Arrays.asList(
          this.tool("jpackage").toString(),
          "--type", type,
@@ -186,7 +213,7 @@ public final class BuildInstaller {
          command.addAll(Arrays.asList("--linux-shortcut", "--linux-menu-group", "Game"));
       }
 
-      System.out.println("Running jpackage...");
+      System.out.println("Running jpackage (" + type + ")...");
       this.exec(null, environment, command.toArray(new String[0]));
 
       Path output = this.dist.resolve("installer");
@@ -206,18 +233,18 @@ public final class BuildInstaller {
          Files.move(built, result, StandardCopyOption.REPLACE_EXISTING);
       }
 
-      System.out.println("Done: " + this.launcherJar);
-      System.out.println("      " + result);
+      return result;
    }
 
-   private String defaultType() {
+   /** Everything a release needs from this OS: the installer plus the portable zip. */
+   private List<String> defaultTypes() {
       switch (this.os) {
          case "windows":
-            return "exe";
+            return Arrays.asList("exe", "app-image");
          case "macos":
-            return "dmg";
+            return Arrays.asList("dmg", "app-image");
          default:
-            return "app-image";
+            return Arrays.asList("app-image");
       }
    }
 
@@ -459,6 +486,8 @@ public final class BuildInstaller {
 
       try (Stream<Path> files = Files.walk(path)) {
          for (Path file : (Iterable<Path>)files.sorted(Comparator.reverseOrder())::iterator) {
+            // jpackage marks some files read-only on Windows, which Files.delete refuses.
+            file.toFile().setWritable(true);
             Files.delete(file);
          }
       }
