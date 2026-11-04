@@ -4,6 +4,7 @@
     <bytecodeTargetLevel target="21">
       <module name="bootstrap" target="21" />
       <module name="launcher" target="21" />
+      <module name="installer" target="21" />
     </bytecodeTargetLevel>
   </component>
 </project>

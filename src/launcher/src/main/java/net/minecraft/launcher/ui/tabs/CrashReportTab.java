@@ -1,36 +1,42 @@
 package net.minecraft.launcher.ui.tabs;
 
-import com.mojang.launcher.Http;
 import com.mojang.launcher.OperatingSystem;
 import com.mojang.launcher.versions.CompleteVersion;
 import java.awt.BorderLayout;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.File;
-import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.HashMap;
-import java.util.Map;
+import java.net.URLEncoder;
 import javax.swing.JButton;
 import javax.swing.JEditorPane;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import net.minecraft.hopper.HopperService;
-import net.minecraft.hopper.PublishResponse;
-import net.minecraft.hopper.SubmitResponse;
 import net.minecraft.launcher.Launcher;
-import net.minecraft.launcher.LauncherConstants;
+import net.minecraft.launcher.selfupdate.SelfUpdater;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+/**
+ * Shows a game crash report. Mojang's old automatic crash service (Hopper) is
+ * gone, so reports are sent by the player instead: Diode problems as a
+ * pre-filled GitHub issue, vanilla game bugs to Mojang's bug tracker.
+ */
 public class CrashReportTab extends JPanel {
    private static final Logger LOGGER = LogManager.getLogger();
+   private static final String GITHUB_NEW_ISSUE = "https://github.com/" + SelfUpdater.UPDATE_REPOSITORY + "/issues/new";
+   private static final URI MOJANG_BUG_TRACKER = URI.create("https://bugs.mojang.com/");
+   // Browsers and GitHub cap URL length, so only the start of a long report
+   // goes in the link; the whole report is copied to the clipboard as well.
+   private static final int MAX_REPORT_IN_LINK = 3000;
    private final Launcher minecraftLauncher;
    private final CompleteVersion version;
    private final File reportFile;
@@ -39,83 +45,17 @@ public class CrashReportTab extends JPanel {
    private final JScrollPane scrollPane = new JScrollPane(this.reportEditor);
    private final CrashReportTab.CrashInfoPane crashInfoPane;
    private final boolean isModded;
-   private SubmitResponse hopperServiceResponse = null;
 
-   public CrashReportTab(final Launcher minecraftLauncher, final CompleteVersion version, File reportFile, final String report) {
+   public CrashReportTab(Launcher minecraftLauncher, CompleteVersion version, File reportFile, String report) {
       super(true);
       this.minecraftLauncher = minecraftLauncher;
       this.version = version;
       this.reportFile = reportFile;
       this.report = report;
-      this.crashInfoPane = new CrashReportTab.CrashInfoPane(minecraftLauncher);
+      this.crashInfoPane = new CrashReportTab.CrashInfoPane();
       this.isModded = !report.contains("Is Modded: Probably not") && !report.contains("Is Modded: Unknown");
       this.setLayout(new BorderLayout());
       this.createInterface();
-      if (minecraftLauncher.getProfileManager().getSelectedProfile().getUseHopperCrashService()) {
-         minecraftLauncher.getLauncher()
-            .getVersionManager()
-            .getExecutorService()
-            .submit(
-               new Runnable() {
-                  @Override
-                  public void run() {
-                     try {
-                        Map<String, String> environment = new HashMap<>();
-                        environment.put("launcher.version", LauncherConstants.getVersionName());
-                        environment.put("launcher.title", minecraftLauncher.getUserInterface().getTitle());
-                        environment.put("bootstrap.version", String.valueOf(minecraftLauncher.getBootstrapVersion()));
-                        CrashReportTab.this.hopperServiceResponse = HopperService.submitReport(
-                           minecraftLauncher.getLauncher().getProxy(), report, "Minecraft", version.getId(), environment
-                        );
-                        CrashReportTab.LOGGER.info("Reported crash to Mojang (ID " + CrashReportTab.this.hopperServiceResponse.getReport().getId() + ")");
-                        if (CrashReportTab.this.hopperServiceResponse.getProblem() != null) {
-                           CrashReportTab.this.showKnownProblemPopup();
-                        } else if (CrashReportTab.this.hopperServiceResponse.getReport().canBePublished()) {
-                           CrashReportTab.this.showPublishReportPrompt();
-                        }
-                     } catch (IOException e) {
-                        CrashReportTab.LOGGER.error("Couldn't report crash to Mojang", e);
-                     }
-                  }
-               }
-            );
-      }
-   }
-
-   private void showPublishReportPrompt() {
-      String[] options = new String[]{"Publish Crash Report", "Cancel"};
-      JLabel message = new JLabel();
-      message.setText(
-         "<html><p>Sorry, but it looks like the game crashed and we don't know why.</p><p>Would you mind publishing this report so that "
-            + (this.isModded ? "the mod authors" : "Mojang")
-            + " can fix it?</p></html>"
-      );
-      int result = JOptionPane.showOptionDialog(this, message, "Uhoh, something went wrong!", 0, 1, null, options, options[0]);
-      if (result == 0) {
-         try {
-            PublishResponse e = HopperService.publishReport(this.minecraftLauncher.getLauncher().getProxy(), this.hopperServiceResponse.getReport());
-         } catch (IOException e) {
-            LOGGER.error("Couldn't publish report " + this.hopperServiceResponse.getReport().getId(), e);
-         }
-      }
-   }
-
-   private void showKnownProblemPopup() {
-      if (this.hopperServiceResponse.getProblem().getUrl() == null) {
-         JOptionPane.showMessageDialog(this, this.hopperServiceResponse.getProblem().getDescription(), this.hopperServiceResponse.getProblem().getTitle(), 1);
-      } else {
-         String[] options = new String[]{"Fix The Problem", "Cancel"};
-         int result = JOptionPane.showOptionDialog(
-            this, this.hopperServiceResponse.getProblem().getDescription(), this.hopperServiceResponse.getProblem().getTitle(), 0, 1, null, options, options[0]
-         );
-         if (result == 0) {
-            try {
-               OperatingSystem.openLink(new URI(this.hopperServiceResponse.getProblem().getUrl()));
-            } catch (URISyntaxException e) {
-               LOGGER.error("Couldn't open help page ( " + this.hopperServiceResponse.getProblem().getUrl() + "  ) for crash", e);
-            }
-         }
-      }
    }
 
    protected void createInterface() {
@@ -125,14 +65,73 @@ public class CrashReportTab extends JPanel {
       this.crashInfoPane.createInterface();
    }
 
+   private void reportOnGitHub() {
+      boolean truncated = this.report.length() > MAX_REPORT_IN_LINK;
+      String shownReport = truncated ? this.report.substring(0, MAX_REPORT_IN_LINK) : this.report;
+      StringBuilder body = new StringBuilder();
+      body.append("**What were you doing when the game crashed?**\n\n\n");
+      body.append("**Environment**\n").append(this.buildEnvironmentInfo()).append("\n\n");
+      body.append("**Crash report**\n");
+      if (truncated) {
+         body.append("_The report was too long for the link, so it's cut short below. The full report was copied to your clipboard: paste it here instead._\n");
+      }
+
+      body.append("```\n").append(shownReport).append("\n```\n");
+      try {
+         this.copyReport();
+         String title = "Minecraft " + this.version.getId() + " crashed";
+         OperatingSystem.openLink(URI.create(GITHUB_NEW_ISSUE + "?title=" + encode(title) + "&body=" + encode(body.toString())));
+      } catch (RuntimeException e) {
+         LOGGER.error("Couldn't open GitHub issue page", e);
+      }
+   }
+
+   private void reportToMojang() {
+      this.copyReport();
+      JOptionPane.showMessageDialog(
+         this,
+         "<html><p>The crash report has been copied to your clipboard.</p><p>Mojang's bug tracker will open next: search for your crash first,<br>and if it isn't there yet, log in and paste the report into a new bug.</p></html>",
+         "Report to Mojang",
+         JOptionPane.INFORMATION_MESSAGE
+      );
+      OperatingSystem.openLink(MOJANG_BUG_TRACKER);
+   }
+
+   private void copyReport() {
+      try {
+         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(this.report), null);
+      } catch (IllegalStateException e) {
+         LOGGER.warn("Couldn't copy crash report to the clipboard", e);
+      }
+   }
+
+   private String buildEnvironmentInfo() {
+      return "- OS: " + System.getProperty("os.name") + " " + System.getProperty("os.version") + " (" + System.getProperty("os.arch") + ")\n"
+         + "- Java: " + System.getProperty("java.version") + " (" + System.getProperty("java.vendor") + ")\n"
+         + "- Launcher: " + this.minecraftLauncher.getUserInterface().getTitle() + " (bootstrap " + this.minecraftLauncher.getBootstrapVersion() + ")\n"
+         + "- Minecraft: " + this.version.getId() + "\n"
+         + "- Modded: " + (this.isModded ? "yes, or unsure" : "probably not");
+   }
+
+   private static String encode(String text) {
+      try {
+         // URLEncoder makes spaces '+', which GitHub shows literally in issue text.
+         return URLEncoder.encode(text, "UTF-8").replace("+", "%20");
+      } catch (UnsupportedEncodingException e) {
+         throw new IllegalStateException(e);
+      }
+   }
+
    private class CrashInfoPane extends JPanel implements ActionListener {
-      public static final String INFO_NORMAL = "<html><div style='width: 100%'><p><b>Uhoh, it looks like the game has crashed! Sorry for the inconvenience :(</b></p><p>Using magic and love, we've managed to gather some details about the crash and we will investigate this as soon as we can.</p><p>You can see the full report below.</p></div></html>";
-      public static final String INFO_MODDED = "<html><div style='width: 100%'><p><b>Uhoh, it looks like the game has crashed! Sorry for the inconvenience :(</b></p><p>We think your game may be modded, and as such we can't accept this crash report.</p><p>However, if you do indeed use mods, please send this to the mod authors to take a look at!</p></div></html>";
-      private final JButton submitButton = new JButton("Report to Mojang");
+      public static final String INFO_NORMAL = "<html><div style='width: 100%'><p><b>Uhoh, it looks like the game has crashed! Sorry for the inconvenience :(</b></p><p>If you think Diode caused it (for example, it works in the official launcher), please report it on GitHub. If it's a bug in Minecraft itself, report it to Mojang.</p><p>You can see the full report below. Check it doesn't contain anything private before posting it.</p></div></html>";
+      public static final String INFO_MODDED = "<html><div style='width: 100%'><p><b>Uhoh, it looks like the game has crashed! Sorry for the inconvenience :(</b></p><p>We think your game may be modded, so Mojang can't accept this crash report. Please send it to the mod authors to take a look at!</p><p>If you think Diode caused it, you can still report it on GitHub.</p></div></html>";
+      private final JButton githubButton = new JButton("Report on GitHub");
+      private final JButton mojangButton = new JButton("Report to Mojang");
       private final JButton openFileButton = new JButton("Open report file");
 
-      protected CrashInfoPane(Launcher minecraftLauncher) {
-         this.submitButton.addActionListener(this);
+      protected CrashInfoPane() {
+         this.githubButton.addActionListener(this);
+         this.mojangButton.addActionListener(this);
          this.openFileButton.addActionListener(this);
       }
 
@@ -143,78 +142,31 @@ public class CrashReportTab extends JPanel {
          constraints.fill = 2;
          constraints.insets = new Insets(2, 2, 2, 2);
          constraints.gridx = 1;
-         this.add(this.submitButton, constraints);
+         this.add(this.githubButton, constraints);
          constraints.gridy = 1;
+         this.add(this.mojangButton, constraints);
+         constraints.gridy = 2;
          this.add(this.openFileButton, constraints);
          constraints.gridx = 0;
          constraints.gridy = 0;
          constraints.weightx = 1.0;
          constraints.weighty = 1.0;
-         constraints.gridheight = 2;
-         this.add(
-            new JLabel(
-               CrashReportTab.this.isModded
-                  ? "<html><div style='width: 100%'><p><b>Uhoh, it looks like the game has crashed! Sorry for the inconvenience :(</b></p><p>We think your game may be modded, and as such we can't accept this crash report.</p><p>However, if you do indeed use mods, please send this to the mod authors to take a look at!</p></div></html>"
-                  : "<html><div style='width: 100%'><p><b>Uhoh, it looks like the game has crashed! Sorry for the inconvenience :(</b></p><p>Using magic and love, we've managed to gather some details about the crash and we will investigate this as soon as we can.</p><p>You can see the full report below.</p></div></html>"
-            ),
-            constraints
-         );
+         constraints.gridheight = 3;
+         this.add(new JLabel(CrashReportTab.this.isModded ? INFO_MODDED : INFO_NORMAL), constraints);
          if (CrashReportTab.this.isModded) {
-            this.submitButton.setEnabled(false);
+            this.mojangButton.setEnabled(false);
          }
       }
 
       @Override
       public void actionPerformed(ActionEvent e) {
-         if (e.getSource() == this.submitButton) {
-            if (CrashReportTab.this.hopperServiceResponse != null) {
-               if (CrashReportTab.this.hopperServiceResponse.getProblem() != null) {
-                  CrashReportTab.this.showKnownProblemPopup();
-               } else if (CrashReportTab.this.hopperServiceResponse.getReport().canBePublished()) {
-                  CrashReportTab.this.showPublishReportPrompt();
-               }
-            } else {
-               try {
-                  Map<String, Object> args = new HashMap<>();
-                  args.put("pid", 10400);
-                  args.put("issuetype", 1);
-                  args.put(
-                     "description",
-                     "Put the summary of the bug you're having here\n\n*What I expected to happen was...:*\nDescribe what you thought should happen here\n\n*What actually happened was...:*\nDescribe what happened here\n\n*Steps to Reproduce:*\n1. Put a step by step guide on how to trigger the bug here\n2. ...\n3. ..."
-                  );
-                  args.put("environment", this.buildEnvironmentInfo());
-                  OperatingSystem.openLink(URI.create("https://bugs.mojang.com/secure/CreateIssueDetails!init.jspa?" + Http.buildQuery(args)));
-               } catch (Throwable ex) {
-                  CrashReportTab.LOGGER.error("Couldn't open bugtracker", ex);
-               }
-            }
+         if (e.getSource() == this.githubButton) {
+            CrashReportTab.this.reportOnGitHub();
+         } else if (e.getSource() == this.mojangButton) {
+            CrashReportTab.this.reportToMojang();
          } else if (e.getSource() == this.openFileButton) {
             OperatingSystem.openLink(CrashReportTab.this.reportFile.toURI());
          }
-      }
-
-      private String buildEnvironmentInfo() {
-         StringBuilder result = new StringBuilder();
-         result.append("OS: ");
-         result.append(System.getProperty("os.name"));
-         result.append(" (ver ");
-         result.append(System.getProperty("os.version"));
-         result.append(", arch ");
-         result.append(System.getProperty("os.arch"));
-         result.append(")\nJava: ");
-         result.append(System.getProperty("java.version"));
-         result.append(" (by ");
-         result.append(System.getProperty("java.vendor"));
-         result.append(")\nLauncher: ");
-         result.append(CrashReportTab.this.minecraftLauncher.getUserInterface().getTitle());
-         result.append(" (bootstrap ");
-         result.append(CrashReportTab.this.minecraftLauncher.getBootstrapVersion());
-         result.append(")\nMinecraft: ");
-         result.append(CrashReportTab.this.version.getId());
-         result.append(" (updated ");
-         result.append(CrashReportTab.this.version.getUpdatedTime());
-         result.append(")");
-         return result.toString();
       }
    }
 }

@@ -1,0 +1,77 @@
+# Builds Windows and macOS installers when a version tag (e.g. v1.2.0) is
+# pushed, and attaches them to a draft GitHub release for you to review and
+# publish. The tag must match Implementation-Version in the launcher manifest,
+# and launcher.jar is attached because the launcher's auto-updater downloads it.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022    # has WiX Toolset 3.14, which JDK 21's jpackage needs
+            name: windows-x64
+          - os: macos-15        # Apple Silicon
+            name: macos-arm64
+          - os: macos-15-intel  # Intel Macs
+            name: macos-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Check tag matches launcher version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version=$(sed -n 's/^Implementation-Version:.* \([0-9][0-9.]*\).*/\1/p' src/launcher/src/main/resources/META-INF/MANIFEST.MF | tr -d '\r')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match launcher version $version (MANIFEST.MF)"
+            exit 1
+          fi
+
+      - name: Build installer
+        run: java installer/src/BuildInstaller.java
+
+      - name: Build portable zip
+        run: java installer/src/BuildInstaller.java --type app-image --use-existing-jar
+
+      - name: Include launcher.jar for the auto-updater
+        if: matrix.name == 'windows-x64'
+        shell: bash
+        run: cp dist/launcher.jar dist/installer/launcher.jar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/installer/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: files
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: files/*

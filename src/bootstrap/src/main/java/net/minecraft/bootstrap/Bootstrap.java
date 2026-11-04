@@ -28,7 +28,6 @@ import joptsimple.OptionException;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
-import net.minecraft.hopper.HopperService;
 
 /**
  * Minecraft bootstrap v5 reconstructed from the original launcher bootstrap,
@@ -41,6 +40,7 @@ import net.minecraft.hopper.HopperService;
 public class Bootstrap extends JFrame {
     private static final Font MONOSPACED = new Font("Monospaced", Font.PLAIN, 12);
     private static final String BOOTSTRAP_VERSION = "5-jdk21";
+    private static final String ISSUES_URL = "https://github.com/WateryContinent/DiodeLauncher/issues/new";
 
     private final File workDir;
     private final Proxy proxy;
@@ -277,22 +277,10 @@ public class Bootstrap extends JFrame {
             ByteArrayOutputStream stacktrace = new ByteArrayOutputStream();
             t.printStackTrace(new PrintStream(stacktrace));
 
-            StringBuilder report = new StringBuilder();
-            report.append(stacktrace)
-                    .append("\n\n-- Head --\nStacktrace:\n")
-                    .append(stacktrace)
-                    .append("\n\n")
-                    .append(frame.outputBuffer)
-                    .append("\tMinecraft.Bootstrap Version: ")
-                    .append(BOOTSTRAP_VERSION);
-
-            try {
-                HopperService.submitReport(proxy, report.toString(), "Minecraft.Bootstrap", BOOTSTRAP_VERSION);
-            } catch (Throwable ignored) {
-            }
-
             frame.println("FATAL ERROR: " + stacktrace);
             frame.println("\nPlease fix the error and restart.");
+            frame.println("If you think this is a bug in Diode, please report it (with the text above) at:");
+            frame.println(ISSUES_URL);
         }
     }
 
