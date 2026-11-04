@@ -54,7 +54,7 @@ import java.util.zip.ZipFile;
 import net.minecraft.launcher.Launcher;
 import net.minecraft.launcher.LauncherConstants;
 import net.minecraft.launcher.profile.LauncherVisibilityRule;
-import net.minecraft.launcher.profile.OfflineUserAuthentication;
+import net.minecraft.launcher.auth.MicrosoftUserAuthentication;
 import net.minecraft.launcher.profile.Profile;
 import net.minecraft.launcher.updater.CompleteMinecraftVersion;
 import net.minecraft.launcher.updater.Library;
@@ -68,10 +68,6 @@ import org.apache.commons.lang3.text.StrSubstitutor;
 
 public class MinecraftGameRunner extends AbstractGameRunner implements GameProcessRunnable {
    private static final String CRASH_IDENTIFIER_MAGIC = "#@!@#";
-   // Mojang added --offlineDeveloperMode in snapshot 25w31a (2025-07-29).
-   // It tells modern clients to use the built-in offline UserApiService instead
-   // of treating an offline launcher session as a restricted Microsoft account.
-   private static final long OFFLINE_DEVELOPER_MODE_INTRODUCED = 1753747200000L;
    private final Gson gson = new Gson();
    private final DateTypeAdapter dateAdapter = new DateTypeAdapter();
    private final Launcher minecraftLauncher;
@@ -224,17 +220,6 @@ public class MinecraftGameRunner extends AbstractGameRunner implements GameProce
          if (args != null) {
             processBuilder.withArguments(args);
 
-            // The custom launcher can create a real local/offline profile. Modern
-            // Minecraft (25w31a / 1.21.9 and newer) has an official launcher flag
-            // for exactly this case. Without it, the client asks the Microsoft
-            // user-properties service with our offline token and greys out the
-            // Multiplayer button. Offline developer mode uses Mojang's built-in
-            // offline UserApiService, which allows LAN/local multiplayer.
-            if (this.auth instanceof OfflineUserAuthentication && this.supportsOfflineDeveloperMode(this.getVersion())) {
-               LOGGER.info("Offline profile detected; enabling Minecraft offline developer mode for local/LAN multiplayer");
-               processBuilder.withArguments("--offlineDeveloperMode");
-            }
-
             Proxy proxy = this.getLauncher().getProxy();
             PasswordAuthentication proxyAuth = this.getLauncher().getProxyAuth();
             if (!proxy.equals(Proxy.NO_PROXY)) {
@@ -305,15 +290,6 @@ public class MinecraftGameRunner extends AbstractGameRunner implements GameProce
       return result.toArray(new String[result.size()]);
    }
 
-   private boolean supportsOfflineDeveloperMode(CompleteMinecraftVersion version) {
-      if (version == null) {
-         return false;
-      }
-
-      Date releaseTime = version.getReleaseTime();
-      return releaseTime != null && releaseTime.getTime() >= OFFLINE_DEVELOPER_MODE_INTRODUCED;
-   }
-
    protected CompleteMinecraftVersion getVersion() {
       return (CompleteMinecraftVersion)this.version;
    }
@@ -374,12 +350,6 @@ public class MinecraftGameRunner extends AbstractGameRunner implements GameProce
          features.put("is_quick_play_multiplayer", false);
          features.put("is_quick_play_realms", false);
          List<String> args = this.expandModernArguments(version.getGameArguments(), substitutor, features);
-         if (authentication instanceof OfflineUserAuthentication) {
-            // An offline/local launcher profile should never be turned into a
-            // client-side multiplayer lock by launcher-supplied flags.
-            args.remove("--disableMultiplayer");
-            args.remove("--disableChat");
-         }
          return args.toArray(new String[args.size()]);
       }
 
@@ -424,15 +394,10 @@ public class MinecraftGameRunner extends AbstractGameRunner implements GameProce
    ) {
       Map<String, String> map = new HashMap<>();
       String accessToken = authentication == null || authentication.getAuthenticatedToken() == null ? "" : authentication.getAuthenticatedToken();
-      if (authentication instanceof OfflineUserAuthentication) {
-         // Older clients predate --offlineDeveloperMode. A deliberately invalid
-         // token makes their authlib fall back to its offline service rather than
-         // interpreting the local profile as a restricted Microsoft account.
-         accessToken = "0";
-      }
       map.put("auth_access_token", accessToken);
-      map.put("clientid", "");
-      map.put("auth_xuid", "");
+      map.put("clientid", LauncherConstants.getMicrosoftClientId());
+      String xuid = authentication instanceof MicrosoftUserAuthentication ? ((MicrosoftUserAuthentication)authentication).getXuid() : null;
+      map.put("auth_xuid", xuid == null ? "" : xuid);
 
       PropertyMap properties = authentication == null ? new PropertyMap() : authentication.getUserProperties();
       map.put("user_properties", new GsonBuilder().registerTypeAdapter(PropertyMap.class, new LegacyPropertyMapSerializer()).create().toJson(properties));
@@ -440,7 +405,9 @@ public class MinecraftGameRunner extends AbstractGameRunner implements GameProce
 
       if (authentication == null || !authentication.isLoggedIn() || !authentication.canPlayOnline()) {
          map.put("auth_session", "-");
-      } else if (authentication instanceof YggdrasilUserAuthentication && authentication.getSelectedProfile() != null) {
+      } else if ((authentication instanceof MicrosoftUserAuthentication || authentication instanceof YggdrasilUserAuthentication)
+         && authentication.getSelectedProfile() != null) {
+         // Pre-1.7 clients take the session as token:<accessToken>:<uuid>.
          map.put("auth_session", String.format("token:%s:%s", accessToken, UUIDTypeAdapter.fromUUID(authentication.getSelectedProfile().getId())));
       } else {
          map.put("auth_session", accessToken);

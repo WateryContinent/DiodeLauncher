@@ -1,5 +1,6 @@
 package net.minecraft.launcher.ui.popups.login;
 
+import com.mojang.launcher.OperatingSystem;
 import java.awt.GridLayout;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
@@ -18,18 +19,20 @@ import javax.swing.JProgressBar;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import net.minecraft.launcher.Launcher;
+import net.minecraft.launcher.LauncherConstants;
+import net.minecraft.launcher.auth.MicrosoftAuthenticator;
+import net.minecraft.launcher.auth.MicrosoftUserAuthentication;
+import net.minecraft.launcher.profile.AuthenticationDatabase;
 
+/** The original 1.6.44 login popup, with Microsoft sign-in as the log in button. */
 public class LogInPopup extends JPanel implements ActionListener {
    private final Launcher minecraftLauncher;
    private final LogInPopup.Callback callback;
-
-   // Retained because a few old helper classes still reference these accessors.
-   // Neither form is shown during normal offline-name login.
    private final AuthErrorForm errorForm;
    private final ExistingUserListForm existingUserListForm;
-
    private final LogInForm logInForm;
-   private final JButton offlineButton = new JButton("Play Offline");
+   private final JButton loginButton = new JButton("Log in with Microsoft");
+   private final JButton registerButton = new JButton("Register");
    private final JProgressBar progressBar = new JProgressBar();
 
    public LogInPopup(Launcher minecraftLauncher, LogInPopup.Callback callback) {
@@ -40,12 +43,11 @@ public class LogInPopup extends JPanel implements ActionListener {
       this.existingUserListForm = new ExistingUserListForm(this);
       this.logInForm = new LogInForm(this);
       this.createInterface();
-      this.offlineButton.addActionListener(this);
+      this.loginButton.addActionListener(this);
+      this.registerButton.addActionListener(this);
    }
 
    protected void createInterface() {
-      // These are the same layout/border values used by the original launcher.
-      this.setOpaque(false);
       this.setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
       this.setBorder(new EmptyBorder(5, 15, 5, 15));
 
@@ -54,7 +56,6 @@ public class LogInPopup extends JPanel implements ActionListener {
             BufferedImage image = ImageIO.read(stream);
             JLabel label = new JLabel(new ImageIcon(image));
             JPanel imagePanel = new JPanel();
-            imagePanel.setOpaque(false);
             imagePanel.add(label);
             this.add(imagePanel);
             this.add(Box.createVerticalStrut(10));
@@ -63,19 +64,18 @@ public class LogInPopup extends JPanel implements ActionListener {
          e.printStackTrace();
       }
 
-      // Keep the original place for authentication errors for binary/source
-      // compatibility, although local offline login normally never displays it.
-      this.errorForm.setOpaque(false);
-      this.logInForm.setOpaque(false);
+      if (!this.minecraftLauncher.getProfileManager().getAuthDatabase().getKnownNames().isEmpty()) {
+         this.add(this.existingUserListForm);
+      }
+
       this.add(this.errorForm);
       this.add(this.logInForm);
       this.add(Box.createVerticalStrut(15));
 
-      // Same original button row, now containing only the one useful action.
       JPanel buttonPanel = new JPanel();
-      buttonPanel.setOpaque(false);
-      buttonPanel.setLayout(new GridLayout(1, 1, 10, 0));
-      buttonPanel.add(this.offlineButton);
+      buttonPanel.setLayout(new GridLayout(1, 2, 10, 0));
+      buttonPanel.add(this.registerButton);
+      buttonPanel.add(this.loginButton);
       this.add(buttonPanel);
 
       this.progressBar.setIndeterminate(true);
@@ -85,13 +85,28 @@ public class LogInPopup extends JPanel implements ActionListener {
 
    @Override
    public void actionPerformed(ActionEvent e) {
-      if (e.getSource() == this.offlineButton) {
-         this.playOffline();
+      if (e.getSource() == this.loginButton) {
+         this.logInWithMicrosoft();
+      } else if (e.getSource() == this.registerButton) {
+         OperatingSystem.openLink(LauncherConstants.URL_REGISTER);
       }
    }
 
-   public void playOffline() {
-      this.minecraftLauncher.enableOfflineMode(this.logInForm.getEnteredUsername());
+   public void logInWithMicrosoft() {
+      this.errorForm.clear();
+      this.setCanLogIn(false);
+      new MicrosoftLoginDialog(this).start();
+   }
+
+   /** Called on the Swing thread once {@link MicrosoftLoginDialog} has signed in. */
+   void onMicrosoftLogin(MicrosoftAuthenticator.Session session) {
+      AuthenticationDatabase authDatabase = this.minecraftLauncher.getProfileManager().getAuthDatabase();
+      MicrosoftUserAuthentication auth = new MicrosoftUserAuthentication(
+         authDatabase.getAuthenticationService(), this.minecraftLauncher.getLauncher().getProxy()
+      );
+      auth.applySession(session);
+      authDatabase.register(auth.getStorageId(), auth);
+      this.setLoggedIn(auth.getStorageId());
    }
 
    public Launcher getMinecraftLauncher() {
@@ -100,7 +115,8 @@ public class LogInPopup extends JPanel implements ActionListener {
 
    public void setCanLogIn(final boolean enabled) {
       if (SwingUtilities.isEventDispatchThread()) {
-         this.offlineButton.setEnabled(enabled);
+         this.loginButton.setEnabled(enabled);
+         this.registerButton.setEnabled(enabled);
          this.progressBar.setIndeterminate(false);
          this.progressBar.setIndeterminate(true);
          this.progressBar.setVisible(!enabled);

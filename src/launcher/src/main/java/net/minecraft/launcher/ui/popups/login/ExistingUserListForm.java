@@ -3,6 +3,7 @@ package net.minecraft.launcher.ui.popups.login;
 import com.google.common.base.Objects;
 import com.mojang.authlib.UserAuthentication;
 import com.mojang.authlib.exceptions.AuthenticationException;
+import com.mojang.authlib.exceptions.InvalidCredentialsException;
 import com.mojang.util.UUIDTypeAdapter;
 import java.awt.Font;
 import java.awt.GridBagConstraints;
@@ -126,12 +127,23 @@ public class ExistingUserListForm extends JPanel implements ActionListener {
                            }
 
                            ExistingUserListForm.this.popup.setLoggedIn(uuid);
-                        } catch (AuthenticationException ex) {
+                        } catch (InvalidCredentialsException ex) {
                            ExistingUserListForm.this.popup
                               .getErrorForm()
                               .displayError(ex, "We couldn't log you back in as " + selected + ".", "Please try to log in again.");
                            ExistingUserListForm.this.removeUser((String)selected, uuid);
                            ExistingUserListForm.this.popup.setCanLogIn(true);
+                        } catch (AuthenticationException ex) {
+                           // Network/service trouble: keep the saved account. If it
+                           // has signed in before it can still play offline.
+                           if (auth.isLoggedIn()) {
+                              ExistingUserListForm.this.popup.setLoggedIn(uuid);
+                           } else {
+                              ExistingUserListForm.this.popup
+                                 .getErrorForm()
+                                 .displayError(ex, "We couldn't log you back in as " + selected + ".", "Please try again later.");
+                              ExistingUserListForm.this.popup.setCanLogIn(true);
+                           }
                         }
                      } else {
                         ExistingUserListForm.this.popup.setCanLogIn(true);

@@ -38,11 +38,7 @@ public class LauncherPanel extends JPanel {
 
    protected JPanel createLauncherInterface() {
       JPanel result = new JPanel(new BorderLayout());
-      if (this.getMinecraftLauncher().isOfflineMode()) {
-         this.tabPanel.showConsole();
-      } else {
-         this.tabPanel.getBlog().setPage("https://waterycontinent.github.io/DiodeLauncher/");
-      }
+      this.tabPanel.getBlog().setPage("https://waterycontinent.github.io/DiodeLauncher/");
 
       JPanel center = new JPanel(new BorderLayout());
       center.add(this.tabPanel, BorderLayout.CENTER);

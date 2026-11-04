@@ -4,17 +4,22 @@ import com.google.common.base.Objects;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
 import com.mojang.authlib.UserAuthentication;
+import com.mojang.authlib.exceptions.AuthenticationException;
 import com.mojang.launcher.game.GameInstanceStatus;
 import com.mojang.launcher.game.runner.GameRunner;
 import com.mojang.launcher.game.runner.GameRunnerListener;
 import com.mojang.launcher.updater.VersionSyncInfo;
 import java.io.File;
+import java.io.IOException;
 import java.util.concurrent.locks.ReentrantLock;
 import net.minecraft.launcher.Launcher;
 import net.minecraft.launcher.profile.Profile;
 import net.minecraft.launcher.profile.ProfileManager;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class GameLaunchDispatcher implements GameRunnerListener {
+   private static final Logger LOGGER = LogManager.getLogger();
    private final Launcher launcher;
    private final String[] additionalLaunchArgs;
    private final ReentrantLock lock = new ReentrantLock();
@@ -78,7 +83,7 @@ public class GameLaunchDispatcher implements GameRunnerListener {
    public void play() {
       ProfileManager profileManager = this.launcher.getProfileManager();
       final Profile profile = profileManager.getSelectedProfile();
-      UserAuthentication user = profileManager.getSelectedUser() == null ? null : profileManager.getAuthDatabase().getByUUID(profileManager.getSelectedUser());
+      final UserAuthentication user = profileManager.getSelectedUser() == null ? null : profileManager.getAuthDatabase().getByUUID(profileManager.getSelectedUser());
       final String lastVersionId = profile.getLastVersionId();
       final MinecraftGameRunner gameRunner = new MinecraftGameRunner(this.launcher, this.additionalLaunchArgs);
       gameRunner.setStatus(GameInstanceStatus.PREPARING);
@@ -101,6 +106,7 @@ public class GameLaunchDispatcher implements GameRunnerListener {
       this.launcher.getLauncher().getVersionManager().getExecutorService().execute(new Runnable() {
          @Override
          public void run() {
+            GameLaunchDispatcher.this.refreshLogin(user);
             gameRunner.setVisibility(Objects.firstNonNull(profile.getLauncherVisibilityOnGameClose(), Profile.DEFAULT_LAUNCHER_VISIBILITY));
             VersionSyncInfo syncInfo = null;
             if (lastVersionId != null) {
@@ -116,6 +122,21 @@ public class GameLaunchDispatcher implements GameRunnerListener {
             gameRunner.playGame(syncInfo);
          }
       });
+   }
+
+   /** Microsoft tokens only last about a day, so renew one that's about to expire before launching. */
+   private void refreshLogin(UserAuthentication user) {
+      if (user == null || !user.canLogIn()) {
+         return;
+      }
+
+      try {
+         LOGGER.info("Refreshing login before launching the game...");
+         user.logIn();
+         this.launcher.getProfileManager().saveProfiles();
+      } catch (AuthenticationException | IOException e) {
+         LOGGER.warn("Couldn't refresh login; the game may only be able to play offline", e);
+      }
    }
 
    @Override

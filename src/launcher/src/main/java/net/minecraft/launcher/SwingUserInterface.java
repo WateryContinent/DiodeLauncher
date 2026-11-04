@@ -202,7 +202,6 @@ public class SwingUserInterface implements MinecraftUserInterface {
       this.showLoginPrompt(this.minecraftLauncher, new LogInPopup.Callback() {
          @Override
          public void onLogIn(String uuid) {
-            SwingUserInterface.this.minecraftLauncher.disableOfflineMode();
             UserAuthentication auth = profileManager.getAuthDatabase().getByUUID(uuid);
             profileManager.setSelectedUser(uuid);
             if (selectedProfile.getName().equals("(Default)") && auth.getSelectedProfile() != null) {

@@ -135,8 +135,6 @@ public class SelfUpdater {
    public void checkOnStartup() {
       if (!this.settings.isCheckForUpdates()) {
          LOGGER.info("Launcher update check skipped (disabled in Launcher Settings)");
-      } else if (this.minecraftLauncher.isOfflineMode()) {
-         LOGGER.info("Launcher update check skipped (offline mode)");
       } else if (this.stagedJar != null) {
          LOGGER.info("Diode " + this.stagedVersion + " is already downloaded and will be installed when the launcher closes");
       } else {

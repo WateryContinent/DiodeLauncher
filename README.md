@@ -6,7 +6,7 @@ A reconstructed Minecraft Launcher 1.6.44 era project, updated to build on **JDK
 
 1. Open this folder in IntelliJ IDEA.
 2. Set the Project SDK to **JDK 21** if IntelliJ asks.
-3. Select **`Bootstrap - Local Online Login`**.
+3. Select **`Diode - Legacy Launcher`**.
 4. Press **Run**.
 
 The run configuration builds `launcher.jar` automatically and places it in `runtime/minecraft/` before starting the bootstrap.
