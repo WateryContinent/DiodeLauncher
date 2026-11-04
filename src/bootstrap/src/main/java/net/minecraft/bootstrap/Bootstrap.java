@@ -190,11 +190,6 @@ public class Bootstrap extends JFrame {
         OptionParser optionParser = new OptionParser();
         optionParser.allowsUnrecognizedOptions();
         optionParser.accepts("help", "Show help").forHelp();
-        OptionSpec<Void> offlineOption = optionParser.accepts(
-                "offline", "Start the launcher in local/offline mode");
-        OptionSpec<String> offlineUserOption = optionParser.accepts(
-                "offlineUser", "Offline player name (1-16 letters, numbers or underscores)")
-                .withRequiredArg().defaultsTo("Player");
 
         OptionSpec<String> proxyHostOption = optionParser.accepts("proxyHost", "Optional SOCKS proxy host").withRequiredArg();
         OptionSpec<Integer> proxyPortOption = optionParser.accepts("proxyPort", "Optional SOCKS proxy port")
@@ -258,11 +253,6 @@ public class Bootstrap extends JFrame {
         }
 
         List<String> strings = new ArrayList<>(optionSet.valuesOf(nonOptions));
-        if (optionSet.has(offlineOption) || optionSet.has(offlineUserOption)) {
-            strings.add("--offline");
-            strings.add("--offlineUser");
-            strings.add(optionSet.valueOf(offlineUserOption));
-        }
         String[] remainderArgs = strings.toArray(new String[strings.size()]);
 
         Bootstrap frame = new Bootstrap(

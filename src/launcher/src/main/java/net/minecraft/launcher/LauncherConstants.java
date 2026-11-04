@@ -5,7 +5,12 @@ import java.net.URISyntaxException;
 
 public class LauncherConstants {
    public static final int VERSION_FORMAT = 17;
-   public static final URI URL_REGISTER = constantURI("https://account.mojang.com/register");
+   // Diode's Azure app registration (public client; not a secret). It must be
+   // approved by Mojang (aka.ms/mce-reviewappid) before Minecraft accepts it.
+   // -Ddiode.msaClientId=<id> overrides it, e.g. for a fork's own app.
+   public static final String MICROSOFT_CLIENT_ID = "c53d746c-e71c-4257-9c36-f4936cc433ff";
+   public static final URI URL_REGISTER = constantURI("https://signup.live.com/");
+   public static final URI URL_LOGIN_HELP = constantURI("https://help.minecraft.net/");
    public static final String URL_DOWNLOAD_BASE = "https://s3.amazonaws.com/Minecraft.Download/";
    public static final String URL_VERSIONS_JSON = "https://launchermeta.mojang.com/mc/game/version_manifest.json";
    public static final String URL_RESOURCE_BASE = "http://resources.download.minecraft.net/";
@@ -38,6 +43,10 @@ public class LauncherConstants {
       } catch (URISyntaxException e) {
          throw new Error(e);
       }
+   }
+
+   public static String getMicrosoftClientId() {
+      return System.getProperty("diode.msaClientId", MICROSOFT_CLIENT_ID);
    }
 
    public static String getVersionName() {

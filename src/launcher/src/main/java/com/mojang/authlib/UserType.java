@@ -5,7 +5,8 @@ import java.util.Map;
 
 public enum UserType {
    LEGACY("legacy"),
-   MOJANG("mojang");
+   MOJANG("mojang"),
+   MSA("msa");
 
    private static final Map<String, UserType> BY_NAME = new HashMap<>();
    private final String name;

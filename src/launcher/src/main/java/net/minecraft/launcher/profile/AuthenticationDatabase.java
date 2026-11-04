@@ -22,8 +22,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Map.Entry;
 import net.minecraft.launcher.Launcher;
+import net.minecraft.launcher.auth.MicrosoftUserAuthentication;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class AuthenticationDatabase {
+   private static final Logger LOGGER = LogManager.getLogger();
    public static final String DEMO_UUID_PREFIX = "demo-";
    private final Map<String, UserAuthentication> authById;
    private final AuthenticationService authenticationService;
@@ -111,14 +115,13 @@ public class AuthenticationDatabase {
 
          for (Entry<String, Map<String, Object>> entry : credentials.entrySet()) {
             Map<String, Object> stored = entry.getValue();
-            UserAuthentication auth;
-            if ("true".equalsIgnoreCase(String.valueOf(stored.get("offline")))) {
-               auth = OfflineUserAuthentication.fromStorage(authService, stored);
+            if (MicrosoftUserAuthentication.isStoredMicrosoftAccount(stored)) {
+               services.put(entry.getKey(), MicrosoftUserAuthentication.fromStorage(authService, this.launcher.getLauncher().getProxy(), stored));
             } else {
-               auth = authService.createUserAuthentication(this.launcher.getLauncher().getAgent());
-               auth.loadFromStorage(stored);
+               // Offline names from Diode 1.x and Mojang (Yggdrasil) accounts
+               // can't be used any more, so they're dropped on load.
+               LOGGER.info("Removing saved account " + entry.getKey() + " that isn't a Microsoft account");
             }
-            services.put(entry.getKey(), auth);
          }
 
          return new AuthenticationDatabase(services, authService);

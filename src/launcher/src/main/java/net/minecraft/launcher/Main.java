@@ -44,19 +44,12 @@ public class Main {
       OptionParser parser = new OptionParser();
       parser.allowsUnrecognizedOptions();
       parser.accepts("winTen");
-      OptionSpec<Void> offlineOption = parser.accepts("offline");
-      OptionSpec<String> offlineUserOption = parser.accepts("offlineUser").withRequiredArg().defaultsTo("Player");
       OptionSpec<String> proxyHostOption = parser.accepts("proxyHost").withRequiredArg();
       OptionSpec<Integer> proxyPortOption = parser.accepts("proxyPort").withRequiredArg().defaultsTo("8080").ofType(Integer.class);
       OptionSpec<File> workDirOption = parser.accepts("workDir").withRequiredArg().ofType(File.class).defaultsTo(getWorkingDirectory());
       OptionSpec<String> nonOption = parser.nonOptions();
       final OptionSet optionSet = parser.parse(args);
       final List<String> leftoverArgs = new ArrayList<>(optionSet.valuesOf(nonOption));
-      if (optionSet.has(offlineOption) || optionSet.has(offlineUserOption)) {
-         leftoverArgs.add("--offline");
-         leftoverArgs.add("--offlineUser");
-         leftoverArgs.add(optionSet.valueOf(offlineUserOption));
-      }
       String hostName = optionSet.valueOf(proxyHostOption);
       Proxy proxy = Proxy.NO_PROXY;
       if (hostName != null) {

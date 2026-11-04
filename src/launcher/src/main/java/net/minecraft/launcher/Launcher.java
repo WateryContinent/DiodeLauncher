@@ -36,7 +36,6 @@ import net.minecraft.launcher.game.GameLaunchDispatcher;
 import net.minecraft.launcher.game.MinecraftReleaseType;
 import net.minecraft.launcher.game.MinecraftReleaseTypeFactory;
 import net.minecraft.launcher.profile.AuthenticationDatabase;
-import net.minecraft.launcher.profile.OfflineUserAuthentication;
 import net.minecraft.launcher.profile.Profile;
 import net.minecraft.launcher.profile.ProfileManager;
 import net.minecraft.launcher.selfupdate.SelfUpdater;
@@ -44,7 +43,6 @@ import net.minecraft.launcher.updater.CompleteMinecraftVersion;
 import net.minecraft.launcher.updater.Library;
 import net.minecraft.launcher.updater.LocalVersionList;
 import net.minecraft.launcher.updater.MinecraftVersionManager;
-import net.minecraft.launcher.updater.OfflineVersionList;
 import net.minecraft.launcher.updater.RemoteVersionList;
 import net.minecraft.launcher.updater.VersionList;
 import org.apache.commons.io.Charsets;
@@ -72,8 +70,6 @@ public class Launcher {
    private boolean winTenHack = false;
    private UUID clientToken = UUID.randomUUID();
    private String requestedUser;
-   private boolean offlineMode;
-   private String offlineUser = "Player";
 
    public Launcher(JFrame frame, File workingDirectory, Proxy proxy, PasswordAuthentication proxyAuth, String[] args) {
       this(frame, workingDirectory, proxy, proxyAuth, args, 0);
@@ -104,9 +100,7 @@ public class Launcher {
       LOGGER.info("System.getProperty('sun.arch.data.model') == '" + System.getProperty("sun.arch.data.model") + "'");
       LOGGER.info("proxy == " + proxy);
       this.launchDispatcher = new GameLaunchDispatcher(this, this.processArgs(args));
-      VersionList remoteVersionList = this.offlineMode
-         ? new OfflineVersionList()
-         : new RemoteVersionList("https://launchermeta.mojang.com/", proxy);
+      VersionList remoteVersionList = new RemoteVersionList("https://launchermeta.mojang.com/", proxy);
       this.launcher = new com.mojang.launcher.Launcher(
          this.userInterface,
          workingDirectory,
@@ -138,8 +132,6 @@ public class Launcher {
       OptionParser optionParser = new OptionParser();
       optionParser.allowsUnrecognizedOptions();
       OptionSpec<String> userOption = optionParser.accepts("user").withRequiredArg().ofType(String.class);
-      OptionSpec<Void> offlineOption = optionParser.accepts("offline");
-      OptionSpec<String> offlineUserOption = optionParser.accepts("offlineUser").withRequiredArg().defaultsTo("Player");
       OptionSpec<String> nonOptions = optionParser.nonOptions();
 
       OptionSet optionSet;
@@ -151,11 +143,6 @@ public class Launcher {
 
       if (optionSet.has(userOption)) {
          this.requestedUser = optionSet.valueOf(userOption);
-      }
-
-      if (optionSet.has(offlineOption) || optionSet.has(offlineUserOption)) {
-         this.offlineMode = true;
-         this.offlineUser = OfflineUserAuthentication.sanitizeUsername(optionSet.valueOf(offlineUserOption));
       }
 
       List<String> remainingOptions = optionSet.valuesOf(nonOptions);
@@ -237,11 +224,6 @@ public class Launcher {
    }
 
    public void ensureLoggedIn() {
-      if (this.offlineMode) {
-         this.enableOfflineMode(this.offlineUser);
-         return;
-      }
-
       UserAuthentication auth = this.profileManager.getAuthDatabase().getByUUID(this.profileManager.getSelectedUser());
       if (auth == null) {
          this.getUserInterface().showLoginPrompt();
@@ -283,42 +265,6 @@ public class Launcher {
             LOGGER.error("Exception whilst logging into profile", e);
          }
       }
-   }
-
-   public boolean isOfflineMode() {
-      return this.offlineMode;
-   }
-
-   public void enableOfflineMode(String requestedName) {
-      String username = OfflineUserAuthentication.sanitizeUsername(requestedName);
-      this.offlineMode = true;
-      this.offlineUser = username;
-
-      AuthenticationDatabase authDatabase = this.profileManager.getAuthDatabase();
-      UserAuthentication existing = authDatabase.getByName(username);
-      OfflineUserAuthentication auth;
-      if (existing instanceof OfflineUserAuthentication) {
-         auth = (OfflineUserAuthentication)existing;
-      } else {
-         auth = new OfflineUserAuthentication(authDatabase.getAuthenticationService(), username);
-         authDatabase.register(auth.getStorageId(), auth);
-      }
-
-      this.profileManager.setSelectedUser(auth.getStorageId());
-      this.profileManager.fireRefreshEvent();
-
-      try {
-         this.profileManager.saveProfiles();
-      } catch (IOException e) {
-         LOGGER.warn("Couldn't save offline profile; continuing in memory only", e);
-      }
-
-      LOGGER.info("Offline mode enabled for " + username);
-      this.getUserInterface().showLauncher();
-   }
-
-   public void disableOfflineMode() {
-      this.offlineMode = false;
    }
 
    public UUID getClientToken() {
