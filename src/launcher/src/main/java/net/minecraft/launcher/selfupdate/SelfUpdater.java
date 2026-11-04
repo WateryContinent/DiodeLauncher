@@ -5,11 +5,18 @@ import com.google.gson.JsonParseException;
 import com.google.gson.annotations.SerializedName;
 import com.mojang.launcher.OperatingSystem;
 import com.mojang.launcher.updater.DownloadProgress;
+import java.awt.BorderLayout;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.StringReader;
 import java.lang.management.ManagementFactory;
 import java.math.BigInteger;
 import java.net.HttpURLConnection;
@@ -32,9 +39,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.jar.JarFile;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.swing.JEditorPane;
 import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
+import javax.swing.event.HyperlinkEvent;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.html.HTMLDocument;
+import javax.swing.text.html.HTMLEditorKit;
+import javax.swing.text.html.StyleSheet;
 import net.minecraft.launcher.Launcher;
 import net.minecraft.launcher.LauncherConstants;
 import net.minecraft.launcher.LauncherSettings;
@@ -202,7 +219,8 @@ public class SelfUpdater {
 
    private SelfUpdater.Release fetchLatestRelease() throws IOException {
       HttpURLConnection connection = this.openConnection(new URL(UPDATE_URL));
-      connection.setRequestProperty("Accept", "application/vnd.github+json");
+      // "full" also returns the release notes already rendered from Markdown to HTML (body_html).
+      connection.setRequestProperty("Accept", "application/vnd.github.full+json");
       int code = connection.getResponseCode();
       if (code == 404) {
          return null;
@@ -219,19 +237,8 @@ public class SelfUpdater {
 
    /** Returns true if the user wants to download the update now. */
    private boolean promptForUpdate(SelfUpdater.Release release, String latestVersion, boolean manual) {
-      StringBuilder message = new StringBuilder();
-      message.append("Diode ").append(latestVersion).append(" is available. You have ").append(this.currentVersion).append(".");
-      if (release.body != null && !release.body.trim().isEmpty()) {
-         String notes = release.body.trim();
-         if (notes.length() > 600) {
-            notes = notes.substring(0, 600) + "...";
-         }
-
-         message.append("\n\n").append(notes);
-      }
-
       String[] options = manual ? new String[]{"Update now", "Not now"} : new String[]{"Update now", "Remind me later", "Skip this version"};
-      int choice = this.showOptionDialog(message.toString(), "Launcher update available", options);
+      int choice = this.showOptionDialog(this.buildUpdateMessage(release, latestVersion), "Launcher update available", options);
       if (choice == 2) {
          this.settings.setSkippedUpdateVersion(latestVersion);
          this.setStatus("Skipped Diode " + latestVersion + ". Use \"Check for updates now\" to install it later.");
@@ -482,7 +489,73 @@ public class SelfUpdater {
       return connection;
    }
 
-   private int showOptionDialog(final String message, final String title, final String[] options) {
+   /** The version line, then the release notes formatted in a scrollable panel. */
+   private Object buildUpdateMessage(SelfUpdater.Release release, String latestVersion) {
+      JLabel heading = new JLabel("Diode " + latestVersion + " is available. You have " + this.currentVersion + ".");
+      heading.setFont(heading.getFont().deriveFont(Font.BOLD));
+      String notesHtml = release.getNotesHtml();
+      if (notesHtml == null) {
+         return heading;
+      }
+
+      Font font = UIManager.getFont("Label.font");
+      String family = font == null ? "sans-serif" : font.getFamily();
+      HTMLEditorKit kit = new HTMLEditorKit();
+      HTMLDocument document = (HTMLDocument)kit.createDefaultDocument();
+      // Rules go on this document only; the kit's own style sheet is shared app-wide.
+      StyleSheet styles = document.getStyleSheet();
+      styles.addRule("body { font-family: '" + family + "'; font-size: 11pt; margin: 4px 8px; }");
+      styles.addRule("h1, h2, h3 { font-size: 12pt; margin-top: 10px; margin-bottom: 2px; }");
+      styles.addRule("p { margin-top: 4px; margin-bottom: 4px; }");
+      styles.addRule("ul { margin-top: 2px; margin-bottom: 4px; margin-left: 18px; }");
+      // Release file names are written as code; a monospace font makes them too wide for the table.
+      styles.addRule("code { font-family: '" + family + "'; font-size: 10pt; }");
+      styles.addRule("th { text-align: left; }");
+      try {
+         // Read into the fresh document; JEditorPane.setText would merge the
+         // first paragraph into the document's empty one and lose it.
+         kit.read(new StringReader("<html><body>" + notesHtml + "</body></html>"), document, 0);
+      } catch (IOException | BadLocationException e) {
+         LOGGER.warn("Couldn't show the release notes", e);
+         return heading;
+      }
+
+      JEditorPane notes = new JEditorPane();
+      notes.setEditable(false);
+      notes.setEditorKit(kit);
+      notes.setDocument(document);
+      notes.setCaretPosition(0);
+      notes.addHyperlinkListener(event -> {
+         if (event.getEventType() == HyperlinkEvent.EventType.ACTIVATED && event.getURL() != null) {
+            try {
+               OperatingSystem.openLink(event.getURL().toURI());
+            } catch (Exception e) {
+               LOGGER.warn("Couldn't open link " + event.getURL(), e);
+            }
+         }
+      });
+      JScrollPane scroll = new JScrollPane(notes);
+      scroll.setPreferredSize(new Dimension(620, 300));
+
+      JPanel panel = new JPanel(new BorderLayout(0, 8));
+      panel.add(heading, BorderLayout.NORTH);
+      panel.add(scroll, BorderLayout.CENTER);
+      if (release.htmlUrl != null) {
+         JLabel link = new JLabel("<html><a href=''>View this release on GitHub</a></html>");
+         link.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+         link.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+               OperatingSystem.openLink(URI.create(release.htmlUrl));
+            }
+         });
+         panel.add(link, BorderLayout.SOUTH);
+      }
+
+      return panel;
+   }
+
+   private int showOptionDialog(final Object message, final String title, final String[] options) {
       final int[] result = new int[]{-1};
       Runnable dialog = () -> {
          JFrame frame = ((SwingUserInterface)this.minecraftLauncher.getUserInterface()).getFrame();
@@ -598,7 +671,29 @@ public class SelfUpdater {
       @SerializedName("tag_name")
       private String tagName;
       private String body;
+      @SerializedName("body_html")
+      private String bodyHtml;
+      @SerializedName("html_url")
+      private String htmlUrl;
       private List<SelfUpdater.Asset> assets;
+
+      /** GitHub's rendered notes, or the plain text ones if only those were sent; null if empty. */
+      private String getNotesHtml() {
+         if (this.bodyHtml != null && !this.bodyHtml.trim().isEmpty()) {
+            // Swing's HTML renderer is HTML 3.2: it doesn't know GitHub's table
+            // wrapper element and ignores CSS table borders, so adjust for it.
+            return this.bodyHtml
+               .replaceAll("</?markdown-accessiblity-table[^>]*>", "")
+               .replaceAll("<table[^>]*>", "<table border=\"1\" cellspacing=\"0\" cellpadding=\"3\">");
+         }
+
+         if (this.body == null || this.body.trim().isEmpty()) {
+            return null;
+         }
+
+         String escaped = this.body.trim().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+         return escaped.replace("\r\n", "\n").replace("\n", "<br>");
+      }
 
       private SelfUpdater.Asset findLauncherJar() {
          if (this.assets == null) {
