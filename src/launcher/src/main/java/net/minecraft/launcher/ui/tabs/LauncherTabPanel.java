@@ -22,6 +22,7 @@ public class LauncherTabPanel extends JTabbedPane {
       this.addTab("Update Notes", this.blog);
       this.addTab("Launcher Log", this.console);
       this.addTab("Profile Editor", new ProfileListTab(this.minecraftLauncher));
+      this.addTab("Launcher Settings", new LauncherSettingsTab(this.minecraftLauncher));
    }
 
    public Launcher getMinecraftLauncher() {

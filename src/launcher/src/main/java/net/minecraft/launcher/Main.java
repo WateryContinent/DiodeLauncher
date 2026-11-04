@@ -106,6 +106,15 @@ public class Main {
    }
 
    public static File getWorkingDirectory() {
+      // Copies installed by the Windows installer set -Ddiode.installed=true.
+      // Their install folder is deleted on uninstall/upgrade, so game data
+      // (worlds included) must live in the user's profile instead.
+      if (Boolean.getBoolean("diode.installed")) {
+         File installedDirectory = getUserDataDirectory(".diode", "diode");
+         LOGGER.info("Installed launcher detected; using working directory {}", new Object[]{installedDirectory});
+         return installedDirectory;
+      }
+
       // When launcher.jar is executed directly, make it portable by default:
       // profiles, versions, libraries, assets and Mojang runtimes all live
       // beside the distributed JAR. --workDir still overrides this.
@@ -114,25 +123,23 @@ public class Main {
          return portableDirectory;
       }
 
+      return getUserDataDirectory(".minecraft", "minecraft");
+   }
+
+   private static File getUserDataDirectory(String hiddenName, String plainName) {
       String userHome = System.getProperty("user.home", ".");
-      File workingDirectory;
       switch (OperatingSystem.getCurrentPlatform()) {
          case LINUX:
-            workingDirectory = new File(userHome, ".minecraft/");
-            break;
+            return new File(userHome, hiddenName + "/");
          case WINDOWS:
             String applicationData = System.getenv("APPDATA");
             String folder = applicationData != null ? applicationData : userHome;
-            workingDirectory = new File(folder, ".minecraft/");
-            break;
+            return new File(folder, hiddenName + "/");
          case OSX:
-            workingDirectory = new File(userHome, "Library/Application Support/minecraft");
-            break;
+            return new File(userHome, "Library/Application Support/" + plainName);
          default:
-            workingDirectory = new File(userHome, "minecraft/");
+            return new File(userHome, plainName + "/");
       }
-
-      return workingDirectory;
    }
 
    private static File getPortableJarDirectory() {

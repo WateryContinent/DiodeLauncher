@@ -89,7 +89,7 @@ public class Bootstrap extends JFrame {
     }
 
     public void execute() {
-        println("Using local launcher.jar; bootstrap self-update checks are disabled.");
+        println("Using local launcher.jar; launcher updates are handled inside the launcher.");
 
         if (!launcherJar.isFile()) {
             throw new FatalBootstrapError(

@@ -13,6 +13,9 @@ runtime/
 # Built release jars
 dist/
 
+# Installer build staging
+build/
+
 # OS noise
 .DS_Store
 Thumbs.db

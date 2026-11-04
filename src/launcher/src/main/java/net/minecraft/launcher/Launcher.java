@@ -39,6 +39,7 @@ import net.minecraft.launcher.profile.AuthenticationDatabase;
 import net.minecraft.launcher.profile.OfflineUserAuthentication;
 import net.minecraft.launcher.profile.Profile;
 import net.minecraft.launcher.profile.ProfileManager;
+import net.minecraft.launcher.selfupdate.SelfUpdater;
 import net.minecraft.launcher.updater.CompleteMinecraftVersion;
 import net.minecraft.launcher.updater.Library;
 import net.minecraft.launcher.updater.LocalVersionList;
@@ -66,6 +67,8 @@ public class Launcher {
    private final ProfileManager profileManager;
    private final Gson gson = new Gson();
    private final GameLaunchDispatcher launchDispatcher;
+   private final LauncherSettings settings;
+   private final SelfUpdater selfUpdater;
    private boolean winTenHack = false;
    private UUID clientToken = UUID.randomUUID();
    private String requestedUser;
@@ -114,9 +117,12 @@ public class Launcher {
          MinecraftReleaseTypeFactory.instance(),
          21
       );
+      this.settings = new LauncherSettings(workingDirectory);
+      this.selfUpdater = new SelfUpdater(this, this.settings, proxy, workingDirectory, args);
       this.profileManager = new ProfileManager(this);
       ((SwingUserInterface)this.userInterface).initializeFrame();
       this.refreshVersionsAndProfiles();
+      this.selfUpdater.checkOnStartup();
    }
 
    private void setupErrorHandling() {
@@ -569,6 +575,14 @@ public class Launcher {
 
    public ProfileManager getProfileManager() {
       return this.profileManager;
+   }
+
+   public LauncherSettings getSettings() {
+      return this.settings;
+   }
+
+   public SelfUpdater getSelfUpdater() {
+      return this.selfUpdater;
    }
 
    public GameLaunchDispatcher getLaunchDispatcher() {
