@@ -4,6 +4,7 @@
     <modules>
       <module fileurl="file://$PROJECT_DIR$/src/bootstrap/bootstrap.iml" filepath="$PROJECT_DIR$/src/bootstrap/bootstrap.iml" />
       <module fileurl="file://$PROJECT_DIR$/src/launcher/launcher.iml" filepath="$PROJECT_DIR$/src/launcher/launcher.iml" />
+      <module fileurl="file://$PROJECT_DIR$/installer/installer.iml" filepath="$PROJECT_DIR$/installer/installer.iml" />
     </modules>
   </component>
 </project>

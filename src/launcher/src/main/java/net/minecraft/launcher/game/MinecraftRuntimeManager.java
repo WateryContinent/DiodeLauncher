@@ -19,6 +19,7 @@ import java.nio.file.Paths;
 import java.util.Locale;
 import java.util.Map;
 import net.minecraft.launcher.updater.CompleteMinecraftVersion;
+import net.minecraft.launcher.updater.Library;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -64,7 +65,7 @@ public final class MinecraftRuntimeManager {
          return this.fallbackToCurrentJava(version, requested, null);
       }
 
-      String platform = this.getPlatformKey();
+      String platform = this.getPlatformKey(version);
       File runtimeHome = this.getRuntimeHome(component, platform);
       File javaExecutable = this.getJavaExecutable(runtimeHome);
 
@@ -347,6 +348,33 @@ public final class MinecraftRuntimeManager {
          throw new IOException("Runtime manifest attempted to escape runtime directory: " + relativePath);
       }
       return target;
+   }
+
+   /**
+    * Minecraft 1.18 and older only ship Intel (x86_64) native libraries for
+    * macOS. On Apple Silicon those versions need Mojang's Intel Java running
+    * under Rosetta, like the official launcher does.
+    */
+   private static boolean hasAppleSiliconNatives(CompleteMinecraftVersion version) {
+      if (version != null && version.getLibraries() != null) {
+         for (Library library : version.getLibraries()) {
+            if (library.getName() != null && library.getName().contains("macos-arm64")) {
+               return true;
+            }
+         }
+      }
+
+      return false;
+   }
+
+   private String getPlatformKey(CompleteMinecraftVersion version) throws IOException {
+      String key = this.getPlatformKey();
+      if ("mac-os-arm64".equals(key) && !hasAppleSiliconNatives(version)) {
+         LOGGER.info("Minecraft {} has no Apple Silicon natives; using Intel Java under Rosetta", version == null ? "?" : version.getId());
+         return "mac-os";
+      }
+
+      return key;
    }
 
    private String getPlatformKey() throws IOException {
