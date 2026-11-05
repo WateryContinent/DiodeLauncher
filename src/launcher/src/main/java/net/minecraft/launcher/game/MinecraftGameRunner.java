@@ -190,6 +190,13 @@ public class MinecraftGameRunner extends AbstractGameRunner implements GameProce
          memoryMb = Math.max(512, Math.min(65536, memoryMb));
          processBuilder.withArguments("-Xmx" + memoryMb + "M");
 
+         if ("net.minecraft.launchwrapper.Launch".equals(this.getVersion().getMainClass())) {
+            File legacyFix = this.extractLegacyFixAgent();
+            if (legacyFix != null) {
+               processBuilder.withArguments("-javaagent:" + legacyFix.getAbsolutePath());
+            }
+         }
+
          String profileArgs = this.selectedProfile.getJavaArgs();
          String[] safeProfileArgs = this.sanitizeProfileJvmArguments(profileArgs);
          if (safeProfileArgs.length > 0) {
@@ -260,6 +267,29 @@ public class MinecraftGameRunner extends AbstractGameRunner implements GameProce
 
             this.minecraftLauncher.performCleanups();
          }
+      }
+   }
+
+   /**
+    * Copies Diode's legacy fix agent (see src/legacyfix) next to the libraries so old Forge
+    * versions can start on Java 8. Returns null if it couldn't be written; the game still launches.
+    */
+   private File extractLegacyFixAgent() {
+      File target = new File(this.getLauncher().getWorkingDirectory(), "libraries/diode/diode-legacy-fix.jar");
+      try (InputStream in = MinecraftGameRunner.class.getResourceAsStream("/diode-legacy-fix.jar")) {
+         if (in == null) {
+            LOGGER.warn("diode-legacy-fix.jar is missing from the launcher; old Forge versions may not start on Java 8");
+            return null;
+         }
+
+         byte[] agent = org.apache.commons.io.IOUtils.toByteArray(in);
+         if (!target.isFile() || !java.util.Arrays.equals(agent, FileUtils.readFileToByteArray(target))) {
+            FileUtils.writeByteArrayToFile(target, agent);
+         }
+         return target;
+      } catch (IOException e) {
+         LOGGER.warn("Couldn't write " + target + "; old Forge versions may not start on Java 8", e);
+         return null;
       }
    }
 

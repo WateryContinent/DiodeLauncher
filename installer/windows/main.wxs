@@ -4,6 +4,7 @@
   original Minecraft launcher installer:
   - its side image and plain white banner (dialog.bmp and banner.bmp next to this file)
   - a "Start Diode Launcher after closing the installer" box on the last page, ticked by default
+  - an "Uninstall Diode Launcher" shortcut in the install folder
   BuildInstaller copies this into the jpackage resource folder and fills in
   @DIODE_INSTALLER_DIR@ with the folder this file is in.
 -->
@@ -84,7 +85,22 @@
       <ComponentGroupRef Id="Shortcuts"/>
       <ComponentGroupRef Id="Files"/>
       <ComponentGroupRef Id="FileAssociations"/>
+      <ComponentRef Id="DiodeUninstallShortcut"/>
     </Feature>
+
+    <!-- An "Uninstall Diode Launcher" shortcut next to the launcher in the install folder.
+         It runs Windows Installer's normal uninstall for this product, the same as removing it
+         from Settings > Apps. Game data lives in %APPDATA%\.diode, so it's kept. -->
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="DiodeUninstallShortcut" Guid="{6d0c3a4e-2f7b-4c1e-9a55-3b8e1f0d7c21}" Win64="yes">
+        <RegistryKey Root="HKCU" Key="Software\$(var.JpAppVendor)\$(var.JpAppName)\Uninstaller">
+          <RegistryValue Type="string" KeyPath="yes" Name="ProductCode" Value="[ProductCode]"/>
+        </RegistryKey>
+        <Shortcut Id="DiodeUninstallShortcut" Name="Uninstall $(var.JpAppName)"
+                  Description="Removes $(var.JpAppName) from this computer. Your worlds and settings are kept."
+                  Target="[System64Folder]msiexec.exe" Arguments="/x [ProductCode]" WorkingDirectory="INSTALLDIR"/>
+      </Component>
+    </DirectoryRef>
 
     <CustomAction Id="JpSetARPINSTALLLOCATION" Property="ARPINSTALLLOCATION" Value="[INSTALLDIR]" />
     <CustomAction Id="JpSetARPCOMMENTS" Property="ARPCOMMENTS" Value="$(var.JpAppDescription)" />
