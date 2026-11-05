@@ -288,12 +288,24 @@ public class MinecraftVersionManager implements VersionManager {
 
       try {
          CompleteMinecraftVersion.AssetIndexInfo assetIndexInfo = version.getAssetIndex();
-         URL indexUrl = assetIndexInfo != null && assetIndexInfo.getUrl() != null && !assetIndexInfo.getUrl().isEmpty()
-            ? new URL(assetIndexInfo.getUrl())
-            : this.remoteVersionList.getUrl("indexes/" + indexName + ".json");
-         inputStream = indexUrl.openConnection(proxy).getInputStream();
-         String json = IOUtils.toString(inputStream);
-         FileUtils.writeStringToFile(indexFile, json);
+         String indexUrl = assetIndexInfo != null && assetIndexInfo.getUrl() != null && !assetIndexInfo.getUrl().isEmpty()
+            ? assetIndexInfo.getUrl()
+            : this.findAssetIndexUrl(indexName);
+         String json;
+         try {
+            if (indexUrl == null) {
+               throw new IOException("Couldn't find where to download asset index '" + indexName + "'");
+            }
+            inputStream = new URL(indexUrl).openConnection(proxy).getInputStream();
+            json = IOUtils.toString(inputStream);
+            FileUtils.writeStringToFile(indexFile, json);
+         } catch (IOException ex) {
+            if (!indexFile.isFile()) {
+               throw ex;
+            }
+            LOGGER.warn("Couldn't download asset index '" + indexName + "', using the saved copy: " + ex);
+            json = FileUtils.readFileToString(indexFile);
+         }
          AssetIndex index = this.gson.fromJson(json, AssetIndex.class);
 
          for (Entry<AssetIndex.AssetObject, String> entry : index.getUniqueObjects().entrySet()) {
@@ -317,6 +329,36 @@ public class MinecraftVersionManager implements VersionManager {
       }
 
       return result;
+   }
+
+   /**
+    * Old version files (like Forge for 1.7.2) only name their asset index, without the URL that
+    * newer files carry. Mojang no longer serves indexes at the old fixed address, so borrow the URL
+    * from a vanilla version that uses the same index.
+    */
+   private String findAssetIndexUrl(String indexName) {
+      String vanillaId;
+      if ("legacy".equals(indexName)) {
+         vanillaId = "1.7.2";
+      } else if ("pre-1.6".equals(indexName)) {
+         vanillaId = "1.5.2";
+      } else {
+         vanillaId = indexName;
+      }
+
+      try {
+         if (this.remoteVersionList.getVersion(vanillaId) == null) {
+            return null;
+         }
+         CompleteMinecraftVersion vanilla = this.remoteVersionList.getCompleteVersion(vanillaId);
+         CompleteMinecraftVersion.AssetIndexInfo info = vanilla.getAssetIndex();
+         if (info != null && indexName.equals(info.getId()) && info.getUrl() != null && !info.getUrl().isEmpty()) {
+            return info.getUrl();
+         }
+      } catch (Exception ex) {
+         LOGGER.warn("Couldn't look up asset index '" + indexName + "' from version " + vanillaId, ex);
+      }
+      return null;
    }
 
    @Override

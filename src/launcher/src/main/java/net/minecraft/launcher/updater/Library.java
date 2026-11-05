@@ -163,7 +163,9 @@ public class Library {
       if (this.downloads != null) {
          return this.downloads.artifact != null;
       }
-      return this.name != null;
+      // Old-style version files list native libraries (lwjgl-platform, jinput-platform) with only
+      // a natives jar, so there's no plain jar to download or put on the classpath.
+      return this.name != null && this.natives == null;
    }
 
    @Override

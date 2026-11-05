@@ -51,8 +51,21 @@ public final class MinecraftRuntimeManager {
     * If the version does not request a Mojang runtime, the JVM running the
     * launcher is used as before.
     */
+   /** Mojang added "javaVersion" to version files in 21w19a (May 2021), and every older vanilla version runs on Java 8. */
+   private static final long JAVA_VERSION_FIELD_ADDED = 1619827200000L; // 2021-05-01T00:00:00Z
+
+   private static boolean isFromBeforeJavaVersions(CompleteMinecraftVersion version) {
+      return version != null && version.getReleaseTime() != null && version.getReleaseTime().getTime() < JAVA_VERSION_FIELD_ADDED;
+   }
+
    public String resolveJavaExecutable(CompleteMinecraftVersion version) throws IOException {
       CompleteMinecraftVersion.JavaVersion requested = version == null ? null : version.getJavaVersion();
+      if (requested == null && isFromBeforeJavaVersions(version)) {
+         // Version files made before Mojang started listing the Java version (old Forge, LiteLoader,
+         // OptiFine and so on) were all made for Java 8. Their launchwrapper crashes on newer Java.
+         LOGGER.info("Version " + version.getId() + " doesn't say which Java it needs; it's from before 2021, so using Java 8");
+         requested = new CompleteMinecraftVersion.JavaVersion("jre-legacy", 8);
+      }
       if (requested == null) {
          return OperatingSystem.getCurrentPlatform().getJavaDir();
       }

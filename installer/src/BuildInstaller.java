@@ -201,6 +201,8 @@ public final class BuildInstaller {
       Map<String, String> environment = null;
       if (this.os.equals("windows") && !type.equals("app-image")) {
          command.addAll(Arrays.asList(
+            "--resource-dir", this.writeWindowsResources().toString(),
+            "--win-dir-chooser",
             "--win-per-user-install",
             "--win-menu", "--win-menu-group", "Diode",
             "--win-shortcut", "--win-shortcut-prompt",
@@ -234,6 +236,21 @@ public final class BuildInstaller {
       }
 
       return result;
+   }
+
+   /**
+    * jpackage resource folder for the Windows installer: our main.wxs, which gives it the original
+    * Minecraft installer's images and a "start after installing" box. The images are referenced by
+    * absolute path because jpackage only copies the files it knows about.
+    */
+   private Path writeWindowsResources() throws IOException {
+      Path source = this.root.resolve("installer/windows").toAbsolutePath();
+      Path resources = this.build.resolve("resources");
+      Files.createDirectories(resources);
+      String mainWxs = Files.readString(source.resolve("main.wxs"))
+         .replace("@DIODE_INSTALLER_DIR@", source.toString().replace('/', '\\'));
+      Files.writeString(resources.resolve("main.wxs"), mainWxs);
+      return resources;
    }
 
    /** Everything a release needs from this OS: the installer plus the portable zip. */

@@ -376,6 +376,14 @@ public class CompleteMinecraftVersion implements CompleteVersion {
       private String component;
       private int majorVersion;
 
+      public JavaVersion() {
+      }
+
+      public JavaVersion(String component, int majorVersion) {
+         this.component = component;
+         this.majorVersion = majorVersion;
+      }
+
       public String getComponent() {
          return this.component;
       }
