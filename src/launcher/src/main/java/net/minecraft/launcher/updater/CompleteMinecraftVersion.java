@@ -132,7 +132,7 @@ public class CompleteMinecraftVersion implements CompleteVersion {
       }
       for (Library library : this.libraries) {
          if (library.appliesToCurrentEnvironment()) {
-            result.add(library);
+            result.add(library.withJava8Fixes());
          }
       }
       return result;

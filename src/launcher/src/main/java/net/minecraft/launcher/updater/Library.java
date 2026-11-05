@@ -64,6 +64,36 @@ public class Library {
       return this.name;
    }
 
+   /**
+    * Old modded versions (Forge for 1.6 and 1.7.2) ask for launchwrapper 1.11 or older, which
+    * crashes on Java 8 with a ConcurrentModificationException in Launch.launch. Mojang doesn't
+    * offer Java 7 any more, so use launchwrapper 1.12 instead: it fixes that bug and works with
+    * the same tweakers (MultiMC and Prism Launcher do the same).
+    */
+   public Library withJava8Fixes() {
+      String prefix = "net.minecraft:launchwrapper:";
+      if (this.name == null || !this.name.startsWith(prefix)) {
+         return this;
+      }
+
+      String[] version = this.name.substring(prefix.length()).split("\\.");
+      try {
+         int major = Integer.parseInt(version[0]);
+         int minor = version.length > 1 ? Integer.parseInt(version[1]) : 0;
+         if (major > 1 || major == 1 && minor >= 12) {
+            return this;
+         }
+      } catch (NumberFormatException e) {
+         return this;
+      }
+
+      Library fixed = new Library(this);
+      fixed.name = prefix + "1.12";
+      fixed.url = null;
+      fixed.downloads = null;
+      return fixed;
+   }
+
    public Library addNative(OperatingSystem operatingSystem, String name) {
       if (operatingSystem == null || !operatingSystem.isSupported()) {
          throw new IllegalArgumentException("Cannot add native for unsupported OS");
