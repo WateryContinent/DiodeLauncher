@@ -51,6 +51,11 @@ public class MinecraftProfileService {
          throw new ProfileException("Couldn't read " + file.getName() + ": " + e.getMessage(), e);
       }
 
+      return this.uploadSkin(accessToken, png, model);
+   }
+
+   /** Uploads a skin picture (a 64x64 or 64x32 PNG). */
+   public Profile uploadSkin(String accessToken, byte[] png, SkinModel model) throws ProfileException {
       String boundary = "----DiodeSkin" + UUID.randomUUID().toString().replace("-", "");
       ByteArrayOutputStream body = new ByteArrayOutputStream();
       try {

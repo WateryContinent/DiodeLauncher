@@ -12,7 +12,9 @@ import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -27,6 +29,8 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
+import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import net.minecraft.launcher.Launcher;
@@ -38,6 +42,8 @@ import net.minecraft.launcher.skins.MinecraftProfileService.Cape;
 import net.minecraft.launcher.skins.MinecraftProfileService.Profile;
 import net.minecraft.launcher.skins.MinecraftProfileService.ProfileException;
 import net.minecraft.launcher.skins.MinecraftProfileService.SkinModel;
+import net.minecraft.launcher.skins.SavedSkins;
+import net.minecraft.launcher.skins.SavedSkins.SavedSkin;
 import net.minecraft.launcher.skins.SkinRenderer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -61,9 +67,15 @@ public class SkinTab extends JPanel implements UserChangedListener {
    private final JButton reloadButton = new JButton("Reload");
    private final JLabel statusLabel = new JLabel(" ");
    private final Map<String, BufferedImage> capeImages = new ConcurrentHashMap<>();
+   private final SavedSkins savedSkins;
+   private final SavedSkinList savedSkinList = new SavedSkinList(this.capeImages::get);
+   private final JButton saveLookButton = new JButton("Save current look...");
+   private final JButton addSkinFileButton = new JButton("Add skin file...");
+   private final JButton renameSavedButton = new JButton("Rename...");
+   private final JButton deleteSavedButton = new JButton("Delete");
    private Profile profile;
    private BufferedImage currentSkin;
-   private File pendingFile;
+   private byte[] pendingPng;
    private BufferedImage pendingSkin;
    private boolean loaded;
    private boolean busy;
@@ -72,7 +84,9 @@ public class SkinTab extends JPanel implements UserChangedListener {
    public SkinTab(Launcher minecraftLauncher) {
       this.minecraftLauncher = minecraftLauncher;
       this.service = new MinecraftProfileService(minecraftLauncher.getLauncher().getProxy());
+      this.savedSkins = new SavedSkins(minecraftLauncher.getLauncher().getWorkingDirectory());
       this.createInterface();
+      this.savedSkinList.setSkins(this.savedSkins.getSkins());
       minecraftLauncher.getProfileManager().addUserChangedListener(this);
       // Only talk to Mojang once the tab is actually opened.
       this.addComponentListener(new ComponentAdapter() {
@@ -126,6 +140,20 @@ public class SkinTab extends JPanel implements UserChangedListener {
       capeRow.add(this.capeBox);
       controls.add(capeRow, constraints);
 
+      controls.add(Box.createVerticalStrut(6), constraints);
+      controls.add(heading("Saved skins"), constraints);
+      JScrollPane savedScroll = new JScrollPane(
+         this.savedSkinList, ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED
+      );
+      savedScroll.getHorizontalScrollBar().setUnitIncrement(28);
+      controls.add(savedScroll, constraints);
+      JPanel savedButtons = row();
+      savedButtons.add(this.saveLookButton);
+      savedButtons.add(this.addSkinFileButton);
+      savedButtons.add(this.renameSavedButton);
+      savedButtons.add(this.deleteSavedButton);
+      controls.add(savedButtons, constraints);
+
       controls.add(Box.createVerticalStrut(10), constraints);
       JPanel saveRow = row();
       saveRow.add(this.saveButton);
@@ -151,6 +179,16 @@ public class SkinTab extends JPanel implements UserChangedListener {
       this.saveButton.addActionListener(e -> this.saveChanges());
       this.undoButton.addActionListener(e -> this.undoChanges());
       this.reloadButton.addActionListener(e -> this.reload());
+      this.savedSkinList.addListSelectionListener(e -> {
+         if (!e.getValueIsAdjusting() && !this.updatingControls) {
+            this.wearSavedSkin(this.savedSkinList.getSelectedValue());
+         }
+         this.updateControls();
+      });
+      this.saveLookButton.addActionListener(e -> this.saveCurrentLook());
+      this.addSkinFileButton.addActionListener(e -> this.addSkinFile());
+      this.renameSavedButton.addActionListener(e -> this.renameSavedSkin());
+      this.deleteSavedButton.addActionListener(e -> this.deleteSavedSkin());
       this.updateControls();
    }
 
@@ -166,8 +204,9 @@ public class SkinTab extends JPanel implements UserChangedListener {
    /** Fetches the selected account's skin and cape from Mojang. */
    public void reload() {
       this.loaded = true;
-      this.pendingFile = null;
+      this.pendingPng = null;
       this.pendingSkin = null;
+      this.clearSavedSelection();
       final MicrosoftUserAuthentication auth = this.getMicrosoftUser();
       if (auth == null) {
          this.profile = null;
@@ -194,12 +233,19 @@ public class SkinTab extends JPanel implements UserChangedListener {
       if (active != null && active.getUrl() != null) {
          this.capeImages.put(active.getId(), this.service.downloadTexture(active.getUrl()));
       }
+      // Saved skins can be worn with any of the account's capes; fetch those for the thumbnails.
+      for (Cape cape : newProfile.getCapes()) {
+         if (cape != active) {
+            this.fetchCapeImage(cape);
+         }
+      }
 
       SwingUtilities.invokeLater(() -> {
          this.profile = newProfile;
          this.currentSkin = skin;
-         this.pendingFile = null;
+         this.pendingPng = null;
          this.pendingSkin = null;
+         this.clearSavedSelection();
          this.accountLabel.setText("Logged in as " + newProfile.getName());
          this.updatingControls = true;
          try {
@@ -221,43 +267,225 @@ public class SkinTab extends JPanel implements UserChangedListener {
    }
 
    private void chooseSkinFile() {
-      JFileChooser chooser = new JFileChooser();
-      chooser.setDialogTitle("Choose a skin");
-      chooser.setFileFilter(new FileNameExtensionFilter("Skin pictures (*.png)", "png"));
-      if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
+      SkinFile chosen = this.chooseSkinPicture("Change skin");
+      if (chosen == null) {
          return;
       }
 
+      this.clearSavedSelection();
+      this.pendingPng = chosen.png;
+      this.pendingSkin = chosen.image;
+      this.updatingControls = true;
+      (SkinRenderer.looksSlim(chosen.image) ? this.slimButton : this.classicButton).setSelected(true);
+      this.updatingControls = false;
+      this.setStatus("Showing " + chosen.file.getName() + ". Click Save changes to use it.");
+      this.updatePreview();
+      this.updateControls();
+   }
+
+   /** Asks for a skin PNG and checks it's a 64x64 or 64x32 picture. Returns null if cancelled or not a skin. */
+   private SkinFile chooseSkinPicture(String title) {
+      JFileChooser chooser = new JFileChooser();
+      chooser.setDialogTitle(title);
+      chooser.setFileFilter(new FileNameExtensionFilter("Skin pictures (*.png)", "png"));
+      if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
+         return null;
+      }
+
       File file = chooser.getSelectedFile();
+      byte[] png;
       BufferedImage image;
       try {
-         image = ImageIO.read(file);
+         png = Files.readAllBytes(file.toPath());
+         image = ImageIO.read(new ByteArrayInputStream(png));
       } catch (IOException e) {
+         png = null;
          image = null;
       }
 
       if (image == null) {
-         JOptionPane.showMessageDialog(this, file.getName() + " isn't a picture Diode can read.", "Change skin", JOptionPane.ERROR_MESSAGE);
-         return;
+         JOptionPane.showMessageDialog(this, file.getName() + " isn't a picture Diode can read.", title, JOptionPane.ERROR_MESSAGE);
+         return null;
       }
       if (image.getWidth() != 64 || (image.getHeight() != 64 && image.getHeight() != 32)) {
          JOptionPane.showMessageDialog(
             this,
             file.getName() + " is " + image.getWidth() + "x" + image.getHeight() + ".\nMinecraft skins must be 64x64 or 64x32 pictures.",
-            "Change skin",
+            title,
             JOptionPane.ERROR_MESSAGE
          );
+         return null;
+      }
+
+      return new SkinFile(file, png, image);
+   }
+
+   /** Tries on a saved skin: shows it and sets it up to be saved, like choosing a skin file. */
+   private void wearSavedSkin(SavedSkin saved) {
+      if (saved == null) {
          return;
       }
 
-      this.pendingFile = file;
-      this.pendingSkin = image;
+      if (this.profile == null) {
+         // Not logged in: still let them look through their saved skins.
+         this.preview.setSkin(saved.getImage(), saved.isSlim(), saved.getCapeId() == null ? null : this.capeImages.get(saved.getCapeId()));
+         this.setStatus("Log in to wear " + saved.getName() + ".");
+         return;
+      }
+
+      this.pendingPng = saved.getPng();
+      this.pendingSkin = saved.getImage();
+      String capeNote = "";
       this.updatingControls = true;
-      (SkinRenderer.looksSlim(image) ? this.slimButton : this.classicButton).setSelected(true);
-      this.updatingControls = false;
-      this.setStatus("Showing " + file.getName() + ". Click Save changes to use it.");
+      try {
+         (saved.isSlim() ? this.slimButton : this.classicButton).setSelected(true);
+         if (saved.getCapeId() == null) {
+            this.capeBox.setSelectedItem(NO_CAPE);
+         } else {
+            Cape cape = this.findCape(saved.getCapeId());
+            if (cape != null) {
+               this.capeBox.setSelectedItem(cape);
+               this.fetchCapeImage(cape);
+            } else {
+               capeNote = " This account doesn't have its cape.";
+            }
+         }
+      } finally {
+         this.updatingControls = false;
+      }
+
+      this.setStatus("Trying on " + saved.getName() + ". Click Save changes to use it." + capeNote);
       this.updatePreview();
       this.updateControls();
+   }
+
+   private void saveCurrentLook() {
+      BufferedImage skin = this.pendingSkin != null ? this.pendingSkin : this.currentSkin;
+      if (skin == null) {
+         return;
+      }
+
+      SavedSkin wearing = this.savedSkinList.getSelectedValue();
+      String suggested = wearing != null ? wearing.getName() : this.profile == null ? "My skin" : this.profile.getName();
+      String name = this.askName("Save current look", "Name for this look:", suggested);
+      if (name == null) {
+         return;
+      }
+
+      try {
+         SavedSkin saved = this.savedSkins.add(name, skin, this.getSelectedModel() == SkinModel.SLIM, capeId(this.getSelectedCape()));
+         this.showSavedSkins(saved);
+         this.setStatus("Added " + name + " to your saved skins.");
+      } catch (IOException e) {
+         LOGGER.warn("Couldn't save skin", e);
+         JOptionPane.showMessageDialog(this, "Couldn't save " + name + ": " + e.getMessage(), "Save current look", JOptionPane.ERROR_MESSAGE);
+      }
+   }
+
+   private void addSkinFile() {
+      SkinFile chosen = this.chooseSkinPicture("Add skin file");
+      if (chosen == null) {
+         return;
+      }
+
+      String fileName = chosen.file.getName();
+      String suggested = fileName.toLowerCase().endsWith(".png") ? fileName.substring(0, fileName.length() - 4) : fileName;
+      String name = this.askName("Add skin file", "Name for this skin:", suggested);
+      if (name == null) {
+         return;
+      }
+
+      try {
+         SavedSkin saved = this.savedSkins.add(name, chosen.image, SkinRenderer.looksSlim(chosen.image), null);
+         this.showSavedSkins(null);
+         this.savedSkinList.setSelectedValue(saved, true); // and try it on
+      } catch (IOException e) {
+         LOGGER.warn("Couldn't save skin", e);
+         JOptionPane.showMessageDialog(this, "Couldn't add " + name + ": " + e.getMessage(), "Add skin file", JOptionPane.ERROR_MESSAGE);
+      }
+   }
+
+   private void renameSavedSkin() {
+      SavedSkin saved = this.savedSkinList.getSelectedValue();
+      if (saved == null) {
+         return;
+      }
+
+      String name = this.askName("Rename", "New name:", saved.getName());
+      if (name == null) {
+         return;
+      }
+
+      try {
+         this.savedSkins.rename(saved, name);
+         this.savedSkinList.repaint();
+      } catch (IOException e) {
+         JOptionPane.showMessageDialog(this, "Couldn't rename it: " + e.getMessage(), "Rename", JOptionPane.ERROR_MESSAGE);
+      }
+   }
+
+   private void deleteSavedSkin() {
+      SavedSkin saved = this.savedSkinList.getSelectedValue();
+      if (saved == null) {
+         return;
+      }
+
+      int answer = JOptionPane.showConfirmDialog(
+         this, "Delete " + saved.getName() + " from your saved skins?\nThis doesn't change the skin on your account.", "Delete", JOptionPane.OK_CANCEL_OPTION
+      );
+      if (answer != JOptionPane.OK_OPTION) {
+         return;
+      }
+
+      try {
+         this.savedSkins.remove(saved);
+         this.showSavedSkins(null);
+      } catch (IOException e) {
+         JOptionPane.showMessageDialog(this, "Couldn't delete it: " + e.getMessage(), "Delete", JOptionPane.ERROR_MESSAGE);
+      }
+   }
+
+   /** Fills the saved skins row again, selecting a skin without trying it on (or selecting nothing). */
+   private void showSavedSkins(SavedSkin select) {
+      this.updatingControls = true;
+      try {
+         this.savedSkinList.setSkins(this.savedSkins.getSkins());
+         if (select != null) {
+            this.savedSkinList.setSelectedValue(select, true);
+         }
+      } finally {
+         this.updatingControls = false;
+      }
+      this.updateControls();
+   }
+
+   private void clearSavedSelection() {
+      this.updatingControls = true;
+      this.savedSkinList.clearSelection();
+      this.updatingControls = false;
+   }
+
+   private String askName(String title, String message, String suggested) {
+      Object answer = JOptionPane.showInputDialog(this, message, title, JOptionPane.PLAIN_MESSAGE, null, null, suggested);
+      if (answer == null) {
+         return null;
+      }
+      String name = answer.toString().trim();
+      if (name.isEmpty()) {
+         return null;
+      }
+      return name.length() > 40 ? name.substring(0, 40) : name;
+   }
+
+   private Cape findCape(String id) {
+      if (this.profile != null) {
+         for (Cape cape : this.profile.getCapes()) {
+            if (cape.getId().equals(id)) {
+               return cape;
+            }
+         }
+      }
+      return null;
    }
 
    private void useDefaultSkin() {
@@ -308,14 +536,14 @@ public class SkinTab extends JPanel implements UserChangedListener {
          return;
       }
 
-      final File file = this.pendingFile;
+      final byte[] png = this.pendingPng;
       final SkinModel model = this.getSelectedModel();
       final Cape cape = this.getSelectedCape();
       final boolean capeChanged = !Objects.equals(capeId(cape), capeId(original.getActiveCape()));
       this.setStatus("Saving...");
       this.runInBackground(() -> {
-         if (file != null) {
-            this.withToken(auth, token -> this.service.uploadSkin(token, file, model));
+         if (png != null) {
+            this.withToken(auth, token -> this.service.uploadSkin(token, png, model));
          } else if (model != original.getSkinModel() && original.getSkinUrl() != null) {
             this.withToken(auth, token -> this.service.changeModel(token, original.getSkinUrl(), model));
          }
@@ -332,8 +560,9 @@ public class SkinTab extends JPanel implements UserChangedListener {
          return;
       }
 
-      this.pendingFile = null;
+      this.pendingPng = null;
       this.pendingSkin = null;
+      this.clearSavedSelection();
       this.updatingControls = true;
       (this.profile.getSkinModel() == SkinModel.SLIM ? this.slimButton : this.classicButton).setSelected(true);
       this.capeBox.setSelectedItem(this.profile.getActiveCape() == null ? NO_CAPE : this.profile.getActiveCape());
@@ -355,21 +584,28 @@ public class SkinTab extends JPanel implements UserChangedListener {
          return;
       }
 
-      final Cape cape = this.getSelectedCape();
-      if (cape != null && cape.getUrl() != null && !this.capeImages.containsKey(cape.getId())) {
-         // Fetch the cape picture so the preview can show it before it's saved.
-         this.minecraftLauncher.getLauncher().getVersionManager().getExecutorService().execute(() -> {
-            try {
-               this.capeImages.put(cape.getId(), this.service.downloadTexture(cape.getUrl()));
-               SwingUtilities.invokeLater(this::updatePreview);
-            } catch (ProfileException e) {
-               LOGGER.warn("Couldn't download cape " + cape.getName(), e);
-            }
-         });
-      }
-
+      this.fetchCapeImage(this.getSelectedCape());
       this.updatePreview();
       this.updateControls();
+   }
+
+   /** Fetches a cape picture in the background so the preview can show it before it's saved. */
+   private void fetchCapeImage(Cape cape) {
+      if (cape == null || cape.getUrl() == null || this.capeImages.containsKey(cape.getId())) {
+         return;
+      }
+
+      this.minecraftLauncher.getLauncher().getVersionManager().getExecutorService().execute(() -> {
+         try {
+            this.capeImages.put(cape.getId(), this.service.downloadTexture(cape.getUrl()));
+            SwingUtilities.invokeLater(() -> {
+               this.updatePreview();
+               this.savedSkinList.refreshThumbnails();
+            });
+         } catch (ProfileException e) {
+            LOGGER.warn("Couldn't download cape " + cape.getName(), e);
+         }
+      });
    }
 
    private void updatePreview() {
@@ -396,11 +632,17 @@ public class SkinTab extends JPanel implements UserChangedListener {
       this.saveButton.setEnabled(ready && this.hasChanges());
       this.undoButton.setEnabled(ready && this.hasChanges());
       this.reloadButton.setEnabled(!this.busy && this.getMicrosoftUser() != null);
+      boolean savedSelected = this.savedSkinList.getSelectedValue() != null;
+      this.savedSkinList.setEnabled(!this.busy);
+      this.saveLookButton.setEnabled(!this.busy && (this.pendingSkin != null || this.currentSkin != null));
+      this.addSkinFileButton.setEnabled(!this.busy);
+      this.renameSavedButton.setEnabled(!this.busy && savedSelected);
+      this.deleteSavedButton.setEnabled(!this.busy && savedSelected);
    }
 
    private boolean hasChanges() {
       return this.profile != null
-         && (this.pendingFile != null
+         && (this.pendingPng != null
             || this.getSelectedModel() != this.profile.getSkinModel()
             || !Objects.equals(capeId(this.getSelectedCape()), capeId(this.profile.getActiveCape())));
    }
@@ -498,6 +740,18 @@ public class SkinTab extends JPanel implements UserChangedListener {
       JPanel panel = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
       ((java.awt.FlowLayout)panel.getLayout()).setHgap(6);
       return panel;
+   }
+
+   private static final class SkinFile {
+      private final File file;
+      private final byte[] png;
+      private final BufferedImage image;
+
+      private SkinFile(File file, byte[] png, BufferedImage image) {
+         this.file = file;
+         this.png = png;
+         this.image = image;
+      }
    }
 
    private interface ProfileCall<T> {
