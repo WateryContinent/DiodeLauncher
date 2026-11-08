@@ -1,3 +1,10 @@
+import java.awt.AlphaComposite;
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.geom.RoundRectangle2D;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
@@ -20,6 +27,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+import javax.imageio.ImageIO;
 
 /**
  * Builds Diode's launcher.jar and packages it, with a bundled Java runtime,
@@ -324,9 +332,13 @@ public final class BuildInstaller {
       System.out.println("Built " + this.launcherJar);
    }
 
-   /** jpackage wants .ico on Windows and .icns on macOS; both can wrap the PNG favicon. */
-   private Path writeIcon() throws IOException {
+   /** jpackage wants .ico on Windows and .icns on macOS. */
+   private Path writeIcon() throws Exception {
       byte[] png = Files.readAllBytes(this.root.resolve("src/launcher/src/main/resources/favicon.png"));
+      if (this.os.equals("macos")) {
+         return this.writeMacIcon(png);
+      }
+
       int size = ((png[16] & 0xFF) << 24) | ((png[17] & 0xFF) << 16) | ((png[18] & 0xFF) << 8) | (png[19] & 0xFF);
       ByteArrayOutputStream bytes = new ByteArrayOutputStream();
       DataOutputStream out = new DataOutputStream(bytes);
@@ -341,31 +353,66 @@ public final class BuildInstaller {
          out.write(littleEndian(png.length));
          out.write(littleEndian(22));
          out.write(png);
-      } else if (this.os.equals("macos")) {
-         icon = this.build.resolve("diode.icns");
-         Map<Integer, String> types = new HashMap<>();
-         types.put(16, "icp4");
-         types.put(32, "icp5");
-         types.put(64, "icp6");
-         types.put(128, "ic07");
-         types.put(256, "ic08");
-         types.put(512, "ic09");
-         types.put(1024, "ic10");
-         String type = types.get(size);
-         if (type == null) {
-            throw new BuildException("favicon.png must be 16, 32, 64, 128, 256, 512 or 1024 pixels square for a macOS icon (it is " + size + ")");
-         }
-         out.writeBytes("icns");
-         out.writeInt(8 + 8 + png.length);
-         out.writeBytes(type);
-         out.writeInt(8 + png.length);
-         out.write(png);
       } else {
          icon = this.build.resolve("diode.png");
          out.write(png);
       }
 
       Files.write(icon, bytes.toByteArray());
+      return icon;
+   }
+
+   /** Makes a .icns with every size macOS asks for, using Apple's own iconutil. */
+   private Path writeMacIcon(byte[] png) throws Exception {
+      System.setProperty("java.awt.headless", "true");
+      BufferedImage block = ImageIO.read(new ByteArrayInputStream(png));
+      BufferedImage dirt = ImageIO.read(this.root.resolve("src/launcher/src/main/resources/dirt.png").toFile());
+      Path iconset = this.build.resolve("diode.iconset");
+      Files.createDirectories(iconset);
+      for (int size : new int[]{16, 32, 128, 256, 512}) {
+         String name = "icon_" + size + "x" + size;
+         ImageIO.write(renderMacIcon(block, dirt, size), "png", iconset.resolve(name + ".png").toFile());
+         ImageIO.write(renderMacIcon(block, dirt, size * 2), "png", iconset.resolve(name + "@2x.png").toFile());
+      }
+
+      Path icon = this.build.resolve("diode.icns");
+      this.exec(null, null, "iconutil", "-c", "icns", "-o", icon.toString(), iconset.toString());
+      return icon;
+   }
+
+   /**
+    * The grass block on dirt, in the rounded square of Apple's icon template (an 824 pixel body
+    * on a 1024 canvas). macOS 26 boxes up any icon that doesn't fill that shape.
+    */
+   static BufferedImage renderMacIcon(BufferedImage block, BufferedImage dirt, int size) {
+      double scale = size / 1024.0;
+      double inset = 100.0 * scale;
+      double body = 824.0 * scale;
+      double arc = 2.0 * 185.4 * scale;
+      BufferedImage icon = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+      Graphics2D g = icon.createGraphics();
+      try {
+         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+         g.setColor(Color.BLACK);
+         g.fill(new RoundRectangle2D.Double(inset, inset, body, body, arc, arc));
+
+         // Everything else only draws inside that shape.
+         g.setComposite(AlphaComposite.SrcAtop);
+         int tile = Math.max(1, (int)Math.round(206.0 * scale));
+         for (int x = (int)inset; x < size; x += tile) {
+            for (int y = (int)inset; y < size; y += tile) {
+               g.drawImage(dirt, x, y, tile, tile, null);
+            }
+         }
+         g.setColor(new Color(0, 0, 0, 110));
+         g.fillRect(0, 0, size, size);
+         int blockSize = (int)Math.round(576.0 * scale);
+         g.drawImage(block, (size - blockSize) / 2, (size - blockSize) / 2, blockSize, blockSize, null);
+      } finally {
+         g.dispose();
+      }
+
       return icon;
    }
 
